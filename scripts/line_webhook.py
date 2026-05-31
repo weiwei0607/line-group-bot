@@ -47,6 +47,9 @@ _SKIP_LOG = {
     "誰請客", "今天誰請", "誰買單", "今天誰買",
     "冷笑話", "冷知識", "上週期", "總結",
     "來隻貓", "貓貓", "來貓", "來隻狗", "狗狗", "來狗",
+    "狐狸", "來隻狐", "柴柴", "柴犬", "來隻柴",
+    "熊貓", "來隻熊貓", "無尾熊", "來隻無尾熊",
+    "浣熊", "來隻浣熊", "今日宇宙",
     "抽寶可夢", "今日寶可夢", "給我建議", "今日忠告",
     "今日食譜", "隨機食譜", "推薦電影", "今日電影", "隨機電影",
     "待辦", "查提醒", "查待辦",
@@ -294,6 +297,49 @@ def fetch_advice() -> str:
         return f"💡 今日忠告（英）\n{advice}"
     except Exception:
         return "💡 建議你今天多喝水 🫗"
+
+
+def fetch_fox_image() -> str | None:
+    try:
+        r = requests.get("https://randomfox.ca/floof/", timeout=8)
+        return r.json().get("image")
+    except Exception:
+        return None
+
+
+def fetch_shiba_image() -> str | None:
+    try:
+        r = requests.get("https://shibe.online/api/shibes?count=1", timeout=8)
+        urls = r.json()
+        return urls[0] if urls else None
+    except Exception:
+        return None
+
+
+def fetch_animal_image(animal: str) -> str | None:
+    try:
+        r = requests.get(f"https://some-random-api.com/animal/{animal}", timeout=8)
+        return r.json().get("image")
+    except Exception:
+        return None
+
+
+def fetch_nasa_apod() -> tuple[str, str | None]:
+    try:
+        r = requests.get(
+            "https://api.nasa.gov/planetary/apod",
+            params={"api_key": "DEMO_KEY"},
+            timeout=10,
+        )
+        d = r.json()
+        title = d.get("title", "")
+        explanation = (d.get("explanation") or "")[:100]
+        media_type = d.get("media_type", "image")
+        url = d.get("url", "") if media_type == "image" else None
+        text = f"🌌 今日宇宙：{title}\n{explanation}..."
+        return text, url
+    except Exception:
+        return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
 
 
 def handle_pairing(text) -> str:
@@ -834,6 +880,12 @@ def handle_message(event):
                 "猜拳 剪刀\n"
                 "貓貓 / 來隻貓\n"
                 "狗狗 / 來隻狗\n"
+                "狐狸\n"
+                "柴柴\n"
+                "熊貓\n"
+                "無尾熊\n"
+                "浣熊\n"
+                "今日宇宙\n"
                 "抽寶可夢\n"
                 "今日食譜\n"
                 "推薦電影\n"
@@ -923,6 +975,29 @@ def handle_message(event):
         elif re.search(r'來隻狗|狗狗|來狗', text):
             reply_image_url = fetch_dog_image()
             reply_text = random.choice(["🐶 狗狗來了！", "汪！🐾", "🐶 今日狗狗！"])
+
+        elif re.search(r'狐狸|來隻狐', text):
+            reply_image_url = fetch_fox_image()
+            reply_text = random.choice(["🦊 狐狸來了！", "🦊 今日狐狸！", "啾啾～ 🦊"])
+
+        elif re.search(r'柴柴|柴犬|來隻柴', text):
+            reply_image_url = fetch_shiba_image()
+            reply_text = random.choice(["🐕 柴柴！！", "wow such shiba 🐕", "今日柴柴！🐕"])
+
+        elif re.search(r'熊貓|來隻熊貓', text):
+            reply_image_url = fetch_animal_image("panda")
+            reply_text = random.choice(["🐼 熊貓！", "今日熊貓 🐼", "圓滾滾來了 🐼"])
+
+        elif re.search(r'無尾熊|來隻無尾熊|無尾熊', text):
+            reply_image_url = fetch_animal_image("koala")
+            reply_text = random.choice(["🐨 無尾熊！", "今日無尾熊 🐨", "抱抱樹 🐨"])
+
+        elif re.search(r'浣熊|來隻浣熊', text):
+            reply_image_url = fetch_animal_image("raccoon")
+            reply_text = random.choice(["🦝 浣熊！", "今日浣熊 🦝", "小偷熊來了 🦝"])
+
+        elif re.search(r'今日宇宙|NASA|宇宙照片', text):
+            reply_text, reply_image_url = fetch_nasa_apod()
 
         elif re.search(r'抽寶可夢|今日寶可夢|來隻寶可夢', text):
             reply_text = fetch_random_pokemon()
