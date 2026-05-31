@@ -159,24 +159,7 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
                 return d
     except Exception:
         pass
-    # 3. 嘗試 Microsoft Translator
-    try:
-        r = requests.post(
-            "https://microsoft-translator-text.p.rapidapi.com/translate",
-            headers={"Content-Type": "application/json", "x-rapidapi-host": "microsoft-translator-text.p.rapidapi.com", "x-rapidapi-key": (_RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "")},
-            params={"api-version": "3.0", "to": target},
-            json=[{"Text": text}],
-            timeout=8,
-        )
-        if r.status_code == 200:
-            d = r.json()
-            if isinstance(d, list) and len(d) > 0:
-                t = d[0].get("translations", [])
-                if t and len(t) > 0:
-                    return t[0].get("text", "")
-    except Exception:
-        pass
-    # 4. Fallback 到 Gemini
+    # 3. Fallback 到 Gemini
     result = call_gemini(f"翻成繁體中文，只給翻譯結果：{text}")
     return result or text
 
