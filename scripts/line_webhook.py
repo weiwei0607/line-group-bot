@@ -36,7 +36,7 @@ def call_gemini(prompt):
         return None
     try:
         url = (f"https://generativelanguage.googleapis.com/v1beta/"
-               f"models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}")
+               f"models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
         resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception:
