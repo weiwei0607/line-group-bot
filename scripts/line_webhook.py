@@ -329,9 +329,12 @@ def handle_message(event):
     reply_text = None
 
     with ApiClient(configuration) as api_client:
+        # ── 隱藏指令：拿 group ID ──
+        if text == "!groupid":
+            reply_text = f"Group ID: {group_id or '非群組訊息'}"
+
         # ── 暱稱登記 ──
-        nick_match = re.match(r'^叫我\s*(.+)$', text)
-        if nick_match:
+        elif nick_match := re.match(r'^叫我\s*(.+)$', text):
             nickname = nick_match.group(1).strip()
             ok = set_nickname(user_id, nickname)
             reply_text = f"好的！之後叫你「{nickname}」了 👋" if ok else "登記失敗，等一下再試 😢"
