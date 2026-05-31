@@ -59,6 +59,7 @@ _SKIP_LOG = {
     "今日運動", "找運動", "來一題", "今日調酒",
     "動漫語錄", "我好無聊", "川普語錄", "隨機梗圖", "諾里斯",
     "動漫圖", "激勵名言",
+    "今日日文單字", "今日漢字", "今日西文單字",
 }
 
 
@@ -915,6 +916,186 @@ def fetch_quotable() -> str:
     return ""
 
 
+# ─── Language Learning ────────────────────────────────────
+
+_JLPT_N5_WORDS = [
+    "食べる", "飲む", "行く", "来る", "見る", "聞く", "話す", "読む", "書く", "買う",
+    "起きる", "寝る", "食べ物", "飲み物", "学校", "電車", "友達", "家族", "先生",
+    "毎日", "今日", "明日", "昨日", "時間", "場所", "電話", "料理", "音楽", "映画",
+    "天気", "勉強", "仕事", "休み", "旅行", "言葉", "日本語", "英語",
+]
+
+_JLPT_N5_KANJI = [
+    "日", "月", "火", "水", "木", "金", "土", "山", "川", "田",
+    "人", "口", "目", "耳", "手", "足", "上", "下", "中", "大",
+    "小", "年", "時", "学", "校", "先", "生", "家", "車", "電",
+    "花", "犬", "猫", "魚", "鳥", "空", "海", "雨", "雪", "風",
+]
+
+
+def _jisho_lookup(word: str) -> dict | None:
+    try:
+        r = requests.get(
+            "https://jisho.org/api/v1/search/words",
+            params={"keyword": word},
+            timeout=10,
+        )
+        data = r.json().get("data", [])
+        if not data:
+            return None
+        entry = data[0]
+        readings = entry.get("japanese", [{}])
+        senses = entry.get("senses", [{}])
+        meanings_en = []
+        for s in senses[:3]:
+            meanings_en.extend(s.get("english_definitions", [])[:2])
+        return {
+            "word": readings[0].get("word") or readings[0].get("reading", word),
+            "reading": readings[0].get("reading", ""),
+            "meanings_en": meanings_en[:4],
+            "jlpt": entry.get("jlpt", []),
+            "common": entry.get("is_common", False),
+        }
+    except Exception:
+        return None
+
+
+def _kanji_lookup(char: str) -> dict | None:
+    try:
+        r = requests.get(f"https://kanjiapi.dev/v1/kanji/{char}", timeout=8)
+        if r.status_code != 200:
+            return None
+        d = r.json()
+        return {
+            "kanji": d.get("kanji", ""),
+            "meanings": d.get("meanings", [])[:4],
+            "kun": d.get("kun_readings", [])[:3],
+            "on": d.get("on_readings", [])[:3],
+            "jlpt": d.get("jlpt"),
+            "strokes": d.get("stroke_count"),
+        }
+    except Exception:
+        return None
+
+
+def fetch_jisho(word: str) -> str:
+    d = _jisho_lookup(word)
+    if not d:
+        return call_gemini(
+            f"用繁體中文解釋日文單字「{word}」的意思和讀音，格式簡潔"
+        ) or f"找不到「{word}」的資料"
+    jlpt = f"  {d['jlpt'][0].upper()}" if d.get("jlpt") else ""
+    common = "  ★常用" if d.get("common") else ""
+    meanings = call_gemini(
+        f"把這些英文意思翻成繁體中文，逗號分隔，只給翻譯：{', '.join(d['meanings_en'])}"
+    ) if d["meanings_en"] else "—"
+    return (
+        f"🇯🇵 {d['word']}（{d['reading']}）{jlpt}{common}\n"
+        f"意思：{meanings}"
+    )
+
+
+def fetch_daily_japanese() -> str:
+    word = random.choice(_JLPT_N5_WORDS)
+    d = _jisho_lookup(word)
+    if not d:
+        return call_gemini(
+            "給我一個 JLPT N5 日文單字，包含：單字、假名讀音、繁體中文意思、例句"
+        ) or "今日單字查詢失敗"
+    jlpt = d["jlpt"][0].upper() if d.get("jlpt") else "N5"
+    meanings = call_gemini(
+        f"把這些英文意思翻成繁體中文，逗號分隔，只給翻譯：{', '.join(d['meanings_en'])}"
+    ) if d["meanings_en"] else "—"
+    return (
+        f"📖 今日日文單字（{jlpt}）\n\n"
+        f"✏️ {d['word']}　読み：{d['reading']}\n"
+        f"意思：{meanings}\n\n"
+        f"試著造個句子看看！"
+    )
+
+
+def fetch_kanji(char: str) -> str:
+    d = _kanji_lookup(char)
+    if not d:
+        return call_gemini(f"用繁體中文解釋日文漢字「{char}」的讀音和意思") or f"找不到「{char}」"
+    jlpt = f"JLPT N{d['jlpt']}" if d.get("jlpt") else "—"
+    on = "、".join(d["on"]) or "—"
+    kun = "、".join(d["kun"]) or "—"
+    meanings = "、".join(d["meanings"]) or "—"
+    return (
+        f"🈶 {d['kanji']}\n"
+        f"音讀：{on}\n"
+        f"訓讀：{kun}\n"
+        f"意思：{meanings}\n"
+        f"筆畫：{d['strokes']}　{jlpt}"
+    )
+
+
+def fetch_daily_kanji() -> str:
+    char = random.choice(_JLPT_N5_KANJI)
+    d = _kanji_lookup(char)
+    if not d:
+        return call_gemini(
+            f"用繁體中文介紹日文漢字「{char}」，包含讀音、意思和例句"
+        ) or "今日漢字查詢失敗"
+    jlpt = f"JLPT N{d['jlpt']}" if d.get("jlpt") else "N5"
+    on = "、".join(d["on"]) or "—"
+    kun = "、".join(d["kun"]) or "—"
+    meanings = "、".join(d["meanings"]) or "—"
+    example = call_gemini(
+        f"用「{char}」造一個簡單日文例句，附假名讀音和繁體中文翻譯，一行即可"
+    ) or ""
+    lines = [
+        f"🈶 今日漢字：{d['kanji']}（{jlpt}）\n",
+        f"音讀：{on}　訓讀：{kun}",
+        f"意思：{meanings}　筆畫：{d['strokes']}",
+    ]
+    if example:
+        lines.append(f"\n例句：{example}")
+    return "\n".join(lines)
+
+
+def fetch_spanish(word: str) -> str:
+    try:
+        r = requests.get(
+            f"https://api.dictionaryapi.dev/api/v2/entries/es/{word}",
+            timeout=8,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and data:
+                entry = data[0]
+                meanings = entry.get("meanings", [])
+                defs = []
+                for m in meanings[:2]:
+                    for defn in m.get("definitions", [])[:2]:
+                        df = defn.get("definition", "")
+                        if df:
+                            defs.append(df)
+                if defs:
+                    phonetic = f"  [{entry.get('phonetic', '')}]" if entry.get("phonetic") else ""
+                    defs_zh = call_gemini(
+                        f"把以下西班牙文解釋翻成繁體中文，條列，只給翻譯：\n" + "\n".join(defs[:3])
+                    ) or "\n".join(defs[:2])
+                    return f"🇪🇸 {entry.get('word', word)}{phonetic}\n\n{defs_zh}"
+    except Exception:
+        pass
+    return call_gemini(
+        f"用繁體中文解釋西班牙文單字「{word}」的意思、詞性和一個例句"
+    ) or f"找不到「{word}」的資料"
+
+
+def fetch_daily_spanish() -> str:
+    return call_gemini(
+        "給我一個 A1-A2 等級的西班牙文單字，格式：\n"
+        "📖 單字：xxx\n"
+        "詞性：xxx\n"
+        "中文意思：xxx\n"
+        "例句：xxx（附中文翻譯）\n"
+        "記憶技巧：一句話"
+    ) or "今日西文單字查詢失敗"
+
+
 def fetch_pokemon_detail(name: str) -> str:
     try:
         r = requests.get(
@@ -1452,6 +1633,12 @@ def handle_message(event):
                 "匯率 / 天氣 [城市]\n"
                 "倒數 6/15\n"
                 "XXX日文怎麼說\n"
+                "查日文 [單字]\n"
+                "今日日文單字\n"
+                "漢字 [字]\n"
+                "今日漢字\n"
+                "查西文 [單字]\n"
+                "今日西文單字\n"
                 "叫我 [暱稱]\n"
                 "@小棉襖 問任何問題"
             )
@@ -1690,6 +1877,26 @@ def handle_message(event):
                 reply_text, reply_image_url = result
             else:
                 reply_text = result
+
+        # ── 日文字典 ──
+        elif m := re.match(r'^查日文\s*(.+)$', text):
+            reply_text = fetch_jisho(m.group(1).strip())
+
+        elif text in ("今日日文單字", "日文單字", "學日文"):
+            reply_text = fetch_daily_japanese()
+
+        elif m := re.match(r'^漢字\s*([^\s])$', text):
+            reply_text = fetch_kanji(m.group(1))
+
+        elif text in ("今日漢字", "學漢字"):
+            reply_text = fetch_daily_kanji()
+
+        # ── 西班牙文字典 ──
+        elif m := re.match(r'^查西文\s*(.+)$', text):
+            reply_text = fetch_spanish(m.group(1).strip())
+
+        elif text in ("今日西文單字", "西文單字", "學西文"):
+            reply_text = fetch_daily_spanish()
 
         # ── 日文問題 ──
         elif (jp := handle_japanese_question(text)):
