@@ -397,7 +397,10 @@ def handle_checkin(member, text, user_goals=None):
     else:
         enc = random.choice(["太棒了！", "繼續保持！", "你最行！", "衝衝衝！", "很好！"])
 
-    bar = "🟩" * day + "⬜" * (total - day)
+    # 用實際打卡天數畫進度條，不用「今天第幾天」
+    stats = get_checkin_stats()
+    checked_count = len(stats.get(member, []))
+    bar = "🟩" * checked_count + "⬜" * max(0, total - checked_count)
     parts = [f"✅ {member} 打卡成功！", f"📝 {content}", bar, f"第 {day}/{total} 天｜{enc}"]
     if streak_msg:
         parts.append(streak_msg)
