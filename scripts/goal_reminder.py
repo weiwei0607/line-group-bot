@@ -11,7 +11,7 @@ import os
 import requests
 from goal_tracker import (
     get_cycle_info, get_checkin_stats, get_goals,
-    get_today_checkins, build_summary_text
+    get_today_checkins, build_summary_text, get_next_cycle_start
 )
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
@@ -91,6 +91,15 @@ def build_final_reminder(cycle_id, day, total):
     return "\n".join(lines)
 
 
+def build_next_cycle_reminder():
+    next_start = get_next_cycle_start()
+    return (
+        f"📅 週期即將結束，記得去訂下一輪（{next_start} 開始）的目標！\n\n"
+        f"指令：設目標：目標1 / 目標2 / 目標3\n"
+        f"趁現在反思這輪做得如何，下輪更精準！💪"
+    )
+
+
 def main():
     cycle_id, day, total = get_cycle_info()
     sent = []
@@ -106,15 +115,17 @@ def main():
         send_line_message(build_midcycle_reminder(cycle_id, day, total))
         sent.append("mid-cycle reminder")
 
-    # 倒數第 2 天：最後衝刺
+    # 倒數第 2 天：最後衝刺 + 提醒設下輪目標
     elif day == total - 1 and total > 3:
         send_line_message(build_final_reminder(cycle_id, day, total))
-        sent.append("final sprint reminder")
+        send_line_message(build_next_cycle_reminder())
+        sent.append("final sprint reminder + next cycle")
 
-    # 最後一天：週期總結
+    # 最後一天：週期總結 + 再次提醒設下輪目標
     elif day == total:
         send_line_message(build_summary_text(cycle_id))
-        sent.append("cycle summary")
+        send_line_message(build_next_cycle_reminder())
+        sent.append("cycle summary + next cycle")
 
     print(f"Day {day}/{total}: sent {sent}")
 

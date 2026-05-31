@@ -93,6 +93,31 @@ def get_resource():
     name, info = JP_RESOURCES[idx]
     return f"📺 本週日文推薦資源\n\n【{name}】\n{info}"
 
+def get_declutter_direction():
+    areas = [
+        "衣服和配件（有沒有超過一年沒穿的？）",
+        "手機相簿（刪掉重複、模糊、沒意義的截圖）",
+        "手機 app（有沒有超過 3 個月沒開的？）",
+        "電腦桌面和下載資料夾",
+        "社群媒體追蹤（有沒有不再需要的帳號？）",
+        "通訊軟體（訊息、群組、聯絡人）",
+        "書和雜誌（看完的、不會再看的）",
+        "包包裡的雜物",
+        "藥品和保養品（有沒有過期的？）",
+        "電子郵件收件匣",
+        "廚房食材（有沒有快過期的？）",
+        "筆記本和文具",
+    ]
+    target = areas[day_of_year % len(areas)]
+    prompt = (
+        f"今天斷捨離的方向是：{target}\n"
+        "請給一則輕鬆的斷捨離小建議，台灣年輕人語氣，"
+        "讓人覺得『好像可以動手』，不超過 3 句，加 emoji。"
+        "開頭用：🧹 今日斷捨離"
+    )
+    result = call_gemini(prompt)
+    return result or f"🧹 今日斷捨離：來整理一下{target}吧！清掉沒用的，讓空間更清爽 ✨"
+
 def send_line_message(text):
     requests.post(
         "https://api.line.me/v2/bot/message/push",
@@ -115,3 +140,7 @@ send_line_message(jp_content)
 # 每 5 天推薦一次學習資源
 if should_show_resource() and not is_sunday:
     send_line_message(get_resource())
+
+# 每天發斷捨離方向
+declutter = get_declutter_direction()
+send_line_message(declutter)

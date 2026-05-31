@@ -16,6 +16,7 @@ from goal_tracker import (
     get_cycle_info, set_goals, get_goals, add_checkin,
     get_checkin_stats, get_today_checkins, build_summary_text,
     get_nickname, set_nickname, update_last_activity,
+    log_chat_message, get_memories,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -262,10 +263,17 @@ def handle_japanese_question(text):
 
 
 def handle_mention(text):
+    memories = get_memories(days=14)
+    context = ""
+    if memories:
+        context = "以下是這個群組最近的記憶摘要（最舊到最新）：\n"
+        context += "\n".join(f"[{d}] {c}" for d, c in memories)
+        context += "\n\n"
     return call_gemini(
-        f"你是一個活潑有趣的朋友群 LINE 機器人，名字叫「小棉襖」。"
+        f"你是一個活潑有趣的朋友群 LINE 機器人，名字叫「小棉襖」。\n"
+        f"{context}"
         f"有人在群組裡傳了：「{text}」\n"
-        f"請用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
+        f"請結合你對這個群組的了解，用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
         f"不要加『大家好』或自我介紹。"
     )
 
@@ -407,12 +415,16 @@ def handle_message(event):
     group_id = getattr(source, 'group_id', None)
     user_id = getattr(source, 'user_id', None)
 
-    # Update last activity in background
+    # Update last activity + log message in background
     threading.Thread(target=update_last_activity, daemon=True).start()
 
     reply_text = None
 
     with ApiClient(configuration) as api_client:
+        member_label = get_member_label(api_client, group_id, user_id)
+        threading.Thread(
+            target=log_chat_message, args=(member_label, text), daemon=True
+        ).start()
 
         # ── 隱藏指令 ──
         if text == "!groupid":
@@ -426,16 +438,14 @@ def handle_message(event):
 
         # ── 十日目標：設目標 ──
         elif re.match(r'^設目標[：:]', text):
-            member = get_member_label(api_client, group_id, user_id)
-            reply_text = handle_set_goals(member, text)
+            reply_text = handle_set_goals(member_label, text)
 
         # ── 十日目標：打卡 ──
         elif text.startswith("打卡"):
-            member = get_member_label(api_client, group_id, user_id)
             cycle_id, _, _ = get_cycle_info()
             goals_dict = get_goals(cycle_id)
-            user_goals = goals_dict.get(member)
-            reply_text = handle_checkin(member, text, user_goals)
+            user_goals = goals_dict.get(member_label)
+            reply_text = handle_checkin(member_label, text, user_goals)
 
         # ── 十日目標：查詢 ──
         elif text in ("查目標", "看目標", "目標"):

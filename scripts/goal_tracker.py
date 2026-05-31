@@ -266,6 +266,86 @@ def build_summary_text(cycle_id=None) -> str:
     return "\n".join(lines).strip()
 
 
+# ─── Group memory ────────────────────────────────────────
+
+def log_chat_message(member, message) -> None:
+    """Log a group message to 聊天記錄 tab (call in background thread)."""
+    if not GOAL_SHEET_ID:
+        return
+    try:
+        token = _get_token()
+        now_str = _now().strftime("%Y-%m-%d %H:%M")
+        _sheets_append(token, "聊天記錄!A:C", [[now_str, member, message]])
+    except Exception:
+        pass
+
+
+def get_today_chat_logs() -> list:
+    """Returns today's chat logs as [(member, message), ...]"""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "聊天記錄!A:C")
+        today = _now().strftime("%Y-%m-%d")
+        result = []
+        for row in rows[1:]:
+            if len(row) >= 3 and row[0].startswith(today):
+                result.append((row[1], row[2]))
+        return result[-200:]  # cap at 200 messages
+    except Exception:
+        return []
+
+
+def add_memory(date_str, content) -> bool:
+    """Store a daily summary in 記憶 tab."""
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "記憶!A:B")
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 1 and row[0] == date_str:
+                _sheets_update(token, f"記憶!B{i}", [[content]])
+                return True
+        _sheets_append(token, "記憶!A:B", [[date_str, content]])
+        return True
+    except Exception:
+        return False
+
+
+def get_memories(days=5) -> list:
+    """Returns last N days of summaries as [(date, content), ...]"""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "記憶!A:B")
+        data = [(r[0], r[1]) for r in rows[1:] if len(r) >= 2]
+        return data[-days:]
+    except Exception:
+        return []
+
+
+# ─── Next cycle info ──────────────────────────────────────
+
+def get_next_cycle_start() -> str:
+    """Returns next cycle start date string like '6/11' or '7/1'."""
+    import calendar as cal
+    now = _now()
+    d, y, m = now.day, now.year, now.month
+    last_day = cal.monthrange(y, m)[1]
+
+    if d <= 10:
+        return f"{m}/11"
+    elif d <= 20:
+        return f"{m}/21"
+    else:
+        next_m = m + 1 if m < 12 else 1
+        next_y = y if m < 12 else y + 1
+        return f"{next_m}/1"
+
+
 # ─── Last activity (silence detection) ───────────────────
 
 def update_last_activity():
