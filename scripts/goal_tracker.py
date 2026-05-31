@@ -266,13 +266,37 @@ def get_streak(member, cycle_id=None) -> int:
     return streak
 
 
+# ─── Cycle helpers ───────────────────────────────────────
+
+def get_cycle_total(cycle_id) -> int:
+    """Returns total days in a cycle given its ID like '2026-05-01'."""
+    y, m, start = (int(x) for x in cycle_id.split('-'))
+    if start <= 20:
+        return 10
+    return calendar.monthrange(y, m)[1] - 20
+
+
+def get_last_cycle_id() -> str:
+    """Returns the cycle_id of the cycle immediately before the current one."""
+    now = _now()
+    d, y, m = now.day, now.year, now.month
+    if d <= 10:
+        prev_m = m - 1 if m > 1 else 12
+        prev_y = y if m > 1 else y - 1
+        return f"{prev_y}-{prev_m:02d}-21"
+    elif d <= 20:
+        return f"{y}-{m:02d}-01"
+    else:
+        return f"{y}-{m:02d}-11"
+
+
 # ─── Summary ──────────────────────────────────────────────
 
 def build_summary_text(cycle_id=None) -> str:
     if cycle_id is None:
         cycle_id, day, total = get_cycle_info()
     else:
-        day, total = 0, 0
+        day, total = 0, get_cycle_total(cycle_id)
 
     goals = get_goals(cycle_id)
     stats = get_checkin_stats(cycle_id)
@@ -345,13 +369,47 @@ def add_memory(date_str, content) -> bool:
 
 
 def get_memories(days=5) -> list:
-    """Returns last N days of summaries as [(date, content), ...]"""
+    """Returns last N days of group summaries as [(date, content), ...]"""
     if not GOAL_SHEET_ID:
         return []
     try:
         token = _get_token()
         rows = _sheets_get(token, "記憶!A:B")
         data = [(r[0], r[1]) for r in rows[1:] if len(r) >= 2]
+        return data[-days:]
+    except Exception:
+        return []
+
+
+# ─── Personal memory ──────────────────────────────────────
+
+def add_personal_memory(member, content) -> bool:
+    """Store a personal note in 個人記憶 tab (date | member | content)."""
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token = _get_token()
+        date_str = _now().strftime("%Y-%m-%d")
+        rows = _sheets_get(token, "個人記憶!A:C")
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 2 and row[0] == date_str and row[1] == member:
+                _sheets_update(token, f"個人記憶!C{i}", [[content]])
+                return True
+        _sheets_append(token, "個人記憶!A:C", [[date_str, member, content]])
+        return True
+    except Exception:
+        return False
+
+
+def get_personal_memories(member, days=14) -> list:
+    """Returns last N days of personal notes for a member as [(date, content), ...]"""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "個人記憶!A:C")
+        data = [(r[0], r[2]) for r in rows[1:]
+                if len(r) >= 3 and r[1] == member]
         return data[-days:]
     except Exception:
         return []

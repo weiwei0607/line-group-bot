@@ -17,6 +17,7 @@ from goal_tracker import (
     get_checkin_stats, get_today_checkins, build_summary_text,
     get_nickname, set_nickname, update_last_activity,
     log_chat_message, get_memories, get_streak,
+    get_last_cycle_id, add_personal_memory, get_personal_memories,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -31,6 +32,25 @@ MEMBERS = ["太后", "毛毛", "二毛"]
 
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
+
+# Pure commands that carry no personal content worth memorising
+_SKIP_LOG = {
+    "查目標", "看目標", "目標", "今天第幾天", "幾天了", "進度", "打卡進度",
+    "今天打卡了嗎", "今日打卡", "誰打卡了", "我的打卡", "打卡記錄", "我打了幾天",
+    "今日運勢", "運勢", "占卜",
+    "誰請客", "今天誰請", "誰買單", "今天誰買",
+    "冷笑話", "冷知識", "上週期", "總結",
+}
+
+
+def _should_log(text: str) -> bool:
+    if text.startswith("!"):
+        return False
+    if text in _SKIP_LOG:
+        return False
+    if re.match(r'^(叫我|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標)', text):
+        return False
+    return True
 
 
 # ─── Gemini ───────────────────────────────────────────────
@@ -262,20 +282,59 @@ def handle_japanese_question(text):
     return None
 
 
-def handle_mention(text):
-    memories = get_memories(days=14)
+def handle_mention(text, member=None):
+    group_mems = get_memories(days=14)
+    personal_mems = get_personal_memories(member, days=14) if member else []
+
     context = ""
-    if memories:
-        context = "以下是這個群組最近的記憶摘要（最舊到最新）：\n"
-        context += "\n".join(f"[{d}] {c}" for d, c in memories)
+    if group_mems:
+        context += "【群組近況】\n"
+        context += "\n".join(f"[{d}] {c}" for d, c in group_mems)
         context += "\n\n"
+    if personal_mems:
+        context += f"【{member} 的個人記憶】\n"
+        context += "\n".join(f"[{d}] {c}" for d, c in personal_mems)
+        context += "\n\n"
+
     return call_gemini(
         f"你是一個活潑有趣的朋友群 LINE 機器人，名字叫「小棉襖」。\n"
         f"{context}"
-        f"有人在群組裡傳了：「{text}」\n"
-        f"請結合你對這個群組的了解，用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
+        f"{'傳訊息的是 ' + member + '，' if member else ''}"
+        f"他說：「{text}」\n"
+        f"請結合你對這個群組和這個人的了解，用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
         f"不要加『大家好』或自我介紹。"
     )
+
+
+def handle_suggest_goals(member, text):
+    topic = re.sub(r'^幫我想目標\s*', '', text).strip()
+    cycle_id, day, total = get_cycle_info()
+    current = get_goals(cycle_id).get(member, [])
+    memories = get_memories(days=7)
+
+    context_parts = []
+    if current:
+        context_parts.append(f"{member} 目前設的目標：{' / '.join(current)}")
+    if topic:
+        context_parts.append(f"方向偏好：{topic}")
+    if memories:
+        context_parts.append("群組最近狀況：" + "；".join(c[:80] for _, c in memories[-3:]))
+    context = "\n".join(context_parts)
+
+    result = call_gemini(
+        f"請幫{member}想 3-5 個適合十天週期的個人目標。\n"
+        f"{context}\n\n"
+        "要求：具體可執行、適合每天打卡確認、有挑戰性但不過分。\n"
+        "例如：每天走 6000 步、每天背 5 個單字、每天記帳、每天做 10 分鐘伸展\n"
+        "格式：每行一個目標加 emoji，結尾附一行提醒如何設定。"
+    )
+    suffix = "\n\n💡 設定指令：設目標：目標1 / 目標2 / 目標3"
+    return (result or "建議：\n💧 每天喝 2000ml 水\n🚶 每天走 6000 步\n📚 每天讀 20 分鐘書") + suffix
+
+
+def handle_last_cycle():
+    last_id = get_last_cycle_id()
+    return build_summary_text(last_id)
 
 
 # ─── Goal command handlers ────────────────────────────────
@@ -430,9 +489,10 @@ def handle_message(event):
 
     with ApiClient(configuration) as api_client:
         member_label = get_member_label(api_client, group_id, user_id)
-        threading.Thread(
-            target=log_chat_message, args=(member_label, text), daemon=True
-        ).start()
+        if _should_log(text):
+            threading.Thread(
+                target=log_chat_message, args=(member_label, text), daemon=True
+            ).start()
 
         # ── 隱藏指令 ──
         if text == "!groupid":
@@ -464,6 +524,12 @@ def handle_message(event):
 
         elif text in ("今天打卡了嗎", "今日打卡", "誰打卡了"):
             reply_text = handle_today_checkins()
+
+        elif text in ("上週期", "上次總結", "上輪總結"):
+            reply_text = handle_last_cycle()
+
+        elif re.match(r'^幫我想目標', text):
+            reply_text = handle_suggest_goals(member_label, text)
 
         elif text in ("我的打卡", "打卡記錄", "我打了幾天"):
             cycle_id, day, total = get_cycle_info()
@@ -534,7 +600,7 @@ def handle_message(event):
         # ── 被點名 ──
         elif (BOT_NAME in text or BOT_DISPLAY_NAME in text
               or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
-            reply_text = handle_mention(text)
+            reply_text = handle_mention(text, member=member_label)
 
         if not reply_text:
             return
