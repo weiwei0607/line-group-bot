@@ -419,7 +419,7 @@ def handle_message(event):
             reply_text = handle_travel(text)
 
         # ── 被點名 ──
-        elif BOT_NAME in text or BOT_DISPLAY_NAME in text or "機器人" in text or "bot" in text.lower():
+        elif BOT_NAME in text or BOT_DISPLAY_NAME in text or "機器人" in text or "小棉襖" in text or "bot" in text.lower():
             reply_text = handle_mention(text)
 
         if not reply_text:
