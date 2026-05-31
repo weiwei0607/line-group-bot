@@ -806,8 +806,34 @@ def handle_message(event):
                 target=log_chat_message, args=(member_label, text), daemon=True
             ).start()
 
+        # ── 指令清單 ──
+        if text in ("指令", "說明", "幫助", "help", "功能"):
+            reply_text = (
+                "📖 小棉襖指令清單\n"
+                "\n【十日目標】\n"
+                "設目標：目標1 / 目標2\n"
+                "打卡 今天做了XXX\n"
+                "查目標　進度　今日打卡\n"
+                "我的打卡　上週期\n"
+                "\n【待辦提醒】\n"
+                "提醒我 明天 要做XXX\n"
+                "提醒 太后 6/5 要做XXX\n"
+                "待辦　完成待辦 XXX\n"
+                "\n【趣味】\n"
+                "貓貓　狗狗　抽寶可夢\n"
+                "今日天蠍（任意星座）\n"
+                "配對 A B　搖骰子　猜拳 剪刀\n"
+                "今日運勢　誰請客　抽籤 A/B\n"
+                "今日食譜　推薦電影\n"
+                "冷笑話　冷知識　給我建議\n"
+                "\n【實用】\n"
+                "匯率　天氣\n"
+                "叫我 [暱稱]\n"
+                "@小棉襖 問任何問題"
+            )
+
         # ── 隱藏指令 ──
-        if text == "!groupid":
+        elif text == "!groupid":
             reply_text = f"Group ID: {group_id or '非群組訊息'}"
 
         # ── 暱稱登記 ──
