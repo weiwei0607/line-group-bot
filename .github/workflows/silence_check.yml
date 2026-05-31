@@ -1,0 +1,29 @@
+name: 沉默偵測
+
+on:
+  schedule:
+    # 每 6 小時檢查一次：0/6/12/18 點 UTC = 8/14/20/2 點台灣時間
+    - cron: "0 0,6,12,18 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Run silence check
+        working-directory: scripts
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOAL_SHEET_ID: ${{ secrets.GOAL_SHEET_ID }}
+          SILENCE_HOURS: "48"
+        run: python silence_check.py
