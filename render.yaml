@@ -3,7 +3,7 @@ services:
     name: weiwei-line-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn scripts.line_webhook:app --bind 0.0.0.0:$PORT
+    startCommand: gunicorn --chdir scripts line_webhook:app --bind 0.0.0.0:$PORT
     envVars:
       - key: LINE_CHANNEL_SECRET
         sync: false
@@ -13,3 +13,11 @@ services:
         sync: false
       - key: LINE_BOT_NAME
         value: 日文小老師
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: GOAL_SHEET_ID
+        sync: false
