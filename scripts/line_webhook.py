@@ -60,6 +60,7 @@ _SKIP_LOG = {
     "動漫語錄", "我好無聊", "川普語錄", "隨機梗圖", "諾里斯",
     "動漫圖", "激勵名言",
     "今日日文單字", "今日漢字", "今日西文單字",
+    "金價", "今日金價", "天文冷知識", "科學冷知識", "數字冷知識",
 }
 
 
@@ -397,6 +398,7 @@ def _ninja(path: str, **kwargs):
 # ─── Translation ──────────────────────────────────────────
 
 _TRANSLATE_PENDING: dict = {}
+_QUIZ_STATE: dict = {}  # group_id -> {question, answer}
 
 _LANG_MAP = {
     "日文": "ja", "日語": "ja",
@@ -837,6 +839,123 @@ def handle_rps(text) -> str:
     else:
         result = random.choice(["哈我贏了 😈", "幸運是我的 🎊", "再猜！！"])
     return f"{user_emoji} VS {bot_emoji}\n{result}"
+
+
+# ─── Health / Utility ─────────────────────────────────────
+
+def calc_bmi(height_cm: float, weight_kg: float) -> dict:
+    bmi = round(weight_kg / (height_cm / 100) ** 2, 1)
+    if bmi < 18.5:
+        cat = "體重過輕 😟"
+    elif bmi < 24:
+        cat = "正常範圍 😊"
+    elif bmi < 27:
+        cat = "過重 😐"
+    elif bmi < 30:
+        cat = "輕度肥胖 😬"
+    else:
+        cat = "中重度肥胖 ⚠️"
+    return {"bmi": bmi, "category": cat}
+
+
+def fetch_nutrition(query: str) -> str:
+    d = _ninja("/v1/nutrition", params={"query": query})
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if not d or not isinstance(d, list):
+        return f"查不到「{query}」的熱量資料，試試英文食物名"
+    items = d.get("items", d) if isinstance(d, dict) else d
+    if not items:
+        return f"查不到「{query}」的熱量資料"
+    lines = [f"🔥 熱量查詢：{query}\n"]
+    for it in items[:3]:
+        lines.append(
+            f"• {it.get('name', '')}（{it.get('serving_size_g', 100)}g）\n"
+            f"  {round(it.get('calories', 0))} 卡　"
+            f"蛋白質 {round(it.get('protein_g', 0))}g　"
+            f"脂肪 {round(it.get('fat_total_g', 0))}g"
+        )
+    return "\n".join(lines)
+
+
+def fetch_calories_burned(activity: str, duration_min: int = 30) -> str:
+    d = _ninja("/v1/caloriesburned", params={"activity": activity, "duration": str(duration_min)})
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if not d or not isinstance(d, list):
+        return call_gemini(f"做「{activity}」{duration_min}分鐘大約消耗多少卡路里？用繁體中文簡短回答")
+    lines = [f"🏃 消耗熱量：{activity}（{duration_min}分鐘）\n"]
+    for it in d[:3]:
+        cal_h = it.get("calories_per_hour", 0)
+        total = round(cal_h * duration_min / 60)
+        lines.append(f"• {it.get('name', activity)}：約 {total} 卡")
+    return "\n".join(lines)
+
+
+def fetch_gold_price() -> str:
+    d = _rapid("get", "gold-price-live.p.rapidapi.com", "/get_metal_prices")
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if not d:
+        return "🪙 金價查詢失敗，待會再試"
+    try:
+        metals = d.get("metals", d)
+        gold = metals.get("XAU") or metals.get("gold") or metals.get("GOLD")
+        silver = metals.get("XAG") or metals.get("silver") or metals.get("SILVER")
+        if not gold:
+            return "🪙 金價資料解析失敗"
+        lines = [f"🪙 今日金價\n\n黃金：${gold} USD/盎司"]
+        try:
+            r2 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=8)
+            rate = r2.json()["rates"].get("TWD", 31)
+            lines.append(f"約 NT$ {round(float(gold) * rate):,} 元/盎司")
+        except Exception:
+            pass
+        if silver:
+            lines.append(f"白銀：${silver} USD/盎司")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[gold] {e}")
+        return "🪙 金價查詢失敗"
+
+
+def fetch_number_fact() -> str:
+    try:
+        r = requests.get("http://numbersapi.com/random/trivia", params={"json": "true"}, timeout=8)
+        text = r.json().get("text", "")
+        if text:
+            zh = call_gemini(f"翻成繁體中文，保持趣味，只給翻譯：{text}")
+            return f"🔢 {zh}"
+    except Exception:
+        pass
+    return call_gemini("給我一個關於數字的有趣冷知識，用繁體中文") or "數字冷知識暫時失靈"
+
+
+def fetch_astronomy_fact() -> str:
+    d = _ninja("/v1/facts", params={"category": "science"})
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if d and isinstance(d, list):
+        fact = d[0].get("fact", "")
+        if fact:
+            zh = call_gemini(f"翻成繁體中文，保持趣味，只給翻譯：{fact}")
+            return f"🔭 {zh}"
+    return call_gemini("給我一個有趣的天文或科學冷知識，用繁體中文") or "天文冷知識暫時失靈"
+
+
+def fetch_recipe_by_ingredient(ingredients: str) -> str:
+    d = _rapid("get", "spoonacular-recipe-food-nutrition-v1.p.rapidapi.com",
+               "/recipes/findByIngredients",
+               params={"ingredients": ingredients, "number": "3", "ranking": "1"})
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if d and isinstance(d, list):
+        lines = [f"🍳 用「{ingredients}」可以做：\n"]
+        for r in d[:3]:
+            title = r.get("title", "")
+            lines.append(f"• {title}")
+        return "\n".join(lines)
+    return call_gemini(f"根據食材「{ingredients}」推薦一道料理和簡單做法，用繁體中文")
 
 
 # ─── Free APIs (no key) ───────────────────────────────────
@@ -1618,8 +1737,14 @@ def handle_message(event):
                 "\n💪 生活\n"
                 "今日運動 / 找運動 [部位]\n"
                 "今日調酒 / 今日調酒 馬丁尼\n"
-                "來一題（隨機問答）\n"
+                "來一題 → 答 xxx → 答案\n"
                 "我好無聊\n"
+                "BMI 165 55\n"
+                "熱量 [食物]\n"
+                "消耗熱量 [活動] 30分鐘\n"
+                "食譜 [食材]\n"
+                "金價\n"
+                "天文冷知識 / 數字冷知識\n"
                 "\n📖 查詢\n"
                 "國家 [名稱]\n"
                 "找書 [書名]\n"
@@ -1813,9 +1938,42 @@ def handle_message(event):
                 body_part = m2.group(1).strip()
             reply_text = fetch_exercise(body_part)
 
-        # ── 來一題 ──
+        # ── 來一題（互動問答，有狀態）──
         elif text == "來一題":
-            reply_text = fetch_trivia()
+            d = _ninja("/v1/trivia")
+            if d is _QUOTA:
+                reply_text = _QUOTA_MSG
+            elif d and isinstance(d, list):
+                q = d[0]
+                question = q.get("question", "")
+                answer = q.get("answer", "")
+                gid = group_id or "default"
+                _QUIZ_STATE[gid] = {"question": question, "answer": answer}
+                cat = q.get("category", "")
+                reply_text = (
+                    f"🧠 來答題！（{cat}）\n\n{question}\n\n"
+                    f"傳「答 你的答案」作答，傳「答案」看解答"
+                )
+            else:
+                reply_text = "🧠 題庫暫時關閉，待會再試"
+
+        elif m := re.match(r'^答\s+(.+)$', text):
+            gid = group_id or "default"
+            if gid in _QUIZ_STATE:
+                state = _QUIZ_STATE[gid]
+                user_ans = m.group(1).strip().lower()
+                correct = state["answer"].lower()
+                if correct in user_ans or user_ans in correct:
+                    _QUIZ_STATE.pop(gid)
+                    reply_text = f"🎉 答對了！答案是：{state['answer']}"
+                else:
+                    reply_text = "❌ 不對喔，再想想！（傳「答案」放棄）"
+
+        elif text == "答案":
+            gid = group_id or "default"
+            if gid in _QUIZ_STATE:
+                state = _QUIZ_STATE.pop(gid)
+                reply_text = f"💡 答案是：{state['answer']}"
 
         # ── 今日調酒 ──
         elif re.match(r'^今日調酒', text):
@@ -1923,6 +2081,41 @@ def handle_message(event):
 
         elif re.search(r'出去玩|要去玩|去旅遊|旅行', text) and random.random() < 0.7:
             reply_text = handle_travel(text)
+
+        # ── BMI ──
+        elif m := re.match(r'^BMI\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$', text, re.IGNORECASE):
+            h, w = float(m.group(1)), float(m.group(2))
+            r2 = calc_bmi(h, w)
+            reply_text = f"⚖️ BMI 計算\n身高 {h}cm / 體重 {w}kg\n\nBMI：{r2['bmi']}\n{r2['category']}"
+
+        elif re.match(r'^BMI$', text, re.IGNORECASE):
+            reply_text = "請傳「BMI 身高 體重」\n例：BMI 165 55"
+
+        # ── 熱量 ──
+        elif m := re.match(r'^熱量\s+(.+)$', text):
+            reply_text = fetch_nutrition(m.group(1).strip())
+
+        # ── 消耗熱量 ──
+        elif m := re.match(r'^消耗熱量\s+(.+?)(?:\s+(\d+)分鐘?)?$', text):
+            activity = m.group(1).strip()
+            duration = int(m.group(2)) if m.group(2) else 30
+            reply_text = fetch_calories_burned(activity, duration)
+
+        # ── 金價 ──
+        elif text in ("金價", "今日金價", "黃金價格"):
+            reply_text = fetch_gold_price()
+
+        # ── 天文冷知識 ──
+        elif text in ("天文冷知識", "科學冷知識", "宇宙冷知識"):
+            reply_text = fetch_astronomy_fact()
+
+        # ── 數字冷知識 ──
+        elif text in ("數字冷知識", "數字趣聞"):
+            reply_text = fetch_number_fact()
+
+        # ── 食譜 [食材] ──
+        elif m := re.match(r'^食譜\s+(.+)$', text):
+            reply_text = fetch_recipe_by_ingredient(m.group(1).strip())
 
         # ── 待翻譯輸入 ──
         elif user_id and user_id in _TRANSLATE_PENDING:
