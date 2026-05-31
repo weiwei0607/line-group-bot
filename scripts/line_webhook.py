@@ -23,6 +23,7 @@ CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
+BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -418,7 +419,7 @@ def handle_message(event):
             reply_text = handle_travel(text)
 
         # ── 被點名 ──
-        elif BOT_NAME in text or "機器人" in text or "bot" in text.lower():
+        elif BOT_NAME in text or BOT_DISPLAY_NAME in text or "機器人" in text or "bot" in text.lower():
             reply_text = handle_mention(text)
 
         if not reply_text:
