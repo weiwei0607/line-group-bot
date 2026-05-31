@@ -21,3 +21,7 @@ services:
         sync: false
       - key: GOAL_SHEET_ID
         sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: RAPIDAPI_KEY
+        sync: false

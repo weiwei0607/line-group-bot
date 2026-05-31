@@ -26,6 +26,8 @@ app = Flask(__name__)
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
 BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
 BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 MEMBERS = ["太后", "毛毛", "二毛"]
@@ -42,6 +44,7 @@ _SKIP_LOG = {
     "冷笑話", "冷知識", "上週期", "總結",
     "來隻貓", "貓貓", "來貓", "來隻狗", "狗狗", "來狗",
     "抽寶可夢", "今日寶可夢", "給我建議", "今日忠告",
+    "今日食譜", "隨機食譜", "推薦電影", "今日電影", "隨機電影",
 }
 
 
@@ -339,6 +342,91 @@ def handle_rps(text) -> str:
     else:
         result = random.choice(["哈我贏了 😈", "幸運是我的 🎊", "再猜！！"])
     return f"{user_emoji} VS {bot_emoji}\n{result}"
+
+
+def fetch_random_meal() -> str:
+    try:
+        r = requests.get("https://www.themealdb.com/api/json/v1/1/random.php", timeout=8)
+        meal = r.json()["meals"][0]
+        name = meal["strMeal"]
+        area = meal.get("strArea", "")
+        category = meal.get("strCategory", "")
+        ingredients = []
+        for i in range(1, 21):
+            ing = (meal.get(f"strIngredient{i}") or "").strip()
+            if not ing:
+                break
+            measure = (meal.get(f"strMeasure{i}") or "").strip()
+            ingredients.append(f"{measure} {ing}".strip())
+        ing_str = "、".join(ingredients[:8]) + ("..." if len(ingredients) > 8 else "")
+        return f"🍽️ 今日食譜：{name}\n地區：{area}　類型：{category}\n食材：{ing_str}"
+    except Exception:
+        return "🍽️ 廚師跑掉了，明天再說 😅"
+
+
+def fetch_random_movie() -> str:
+    if not TMDB_API_KEY:
+        return "🎬 需要設定 TMDB_API_KEY（去 themoviedb.org 免費申請）"
+    try:
+        page = random.randint(1, 8)
+        r = requests.get(
+            "https://api.themoviedb.org/3/discover/movie",
+            params={"api_key": TMDB_API_KEY, "language": "zh-TW",
+                    "sort_by": "popularity.desc", "page": page},
+            timeout=8,
+        )
+        movies = [m for m in r.json().get("results", []) if m.get("overview")]
+        if not movies:
+            return "🎬 電影院關門了，待會再試 😅"
+        movie = random.choice(movies)
+        title = movie["title"]
+        orig = movie.get("original_title", "")
+        year = (movie.get("release_date") or "")[:4]
+        rating = movie.get("vote_average", 0)
+        overview = (movie.get("overview") or "")[:80]
+        title_line = f"《{title}》" + (f"（{orig}）" if orig != title else "")
+        return f"🎬 今日電影推薦\n{title_line}\n{year}　⭐ {rating}/10\n{overview}..."
+    except Exception:
+        return "🎬 電影院關門了，待會再試 😅"
+
+
+_ZODIAC = {
+    "牡羊": "aries", "白羊": "aries", "金牛": "taurus", "雙子": "gemini",
+    "巨蟹": "cancer", "獅子": "leo", "處女": "virgo", "天秤": "libra",
+    "天蠍": "scorpio", "射手": "sagittarius", "摩羯": "capricorn",
+    "水瓶": "aquarius", "雙魚": "pisces",
+}
+_ZODIAC_ZH = {v: k for k, v in _ZODIAC.items()}
+
+
+def fetch_horoscope(text) -> str:
+    if not RAPIDAPI_KEY:
+        return "🔮 需要設定 RAPIDAPI_KEY（RapidAPI 免費申請）"
+    sign_zh = next((k for k in _ZODIAC if k in text), None)
+    if not sign_zh:
+        signs = " / ".join(_ZODIAC.keys())
+        return f"🔮 請說「今日天蠍」「今日牡羊」...\n支援：{signs}"
+    sign_en = _ZODIAC[sign_zh]
+    try:
+        r = requests.post(
+            f"https://aztro.p.rapidapi.com/?sign={sign_en}&day=today",
+            headers={"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": "aztro.p.rapidapi.com"},
+            timeout=8,
+        )
+        d = r.json()
+        desc = d.get("description", "")
+        mood = d.get("mood", "")
+        color = d.get("color", "")
+        lucky = d.get("lucky_number", "")
+        compat = _ZODIAC_ZH.get(d.get("compatibility", "").lower(), d.get("compatibility", ""))
+        return (
+            f"🔮 今日{sign_zh}座運勢\n\n"
+            f"{desc}\n\n"
+            f"心情：{mood}　幸運色：{color}\n"
+            f"幸運數字：{lucky}　速配星座：{compat}座"
+        )
+    except Exception:
+        return "🔮 占星師在睡覺，待會再問 😴"
 
 
 def handle_leave(_):
@@ -723,6 +811,15 @@ def handle_message(event):
 
         elif re.search(r'給我建議|今日忠告', text):
             reply_text = fetch_advice()
+
+        elif re.search(r'今日食譜|隨機食譜|吃什麼食譜|今天做什麼', text):
+            reply_text = fetch_random_meal()
+
+        elif re.search(r'推薦電影|今日電影|隨機電影|看什麼電影', text):
+            reply_text = fetch_random_movie()
+
+        elif re.search(r'今日(牡羊|白羊|金牛|雙子|巨蟹|獅子|處女|天秤|天蠍|射手|摩羯|水瓶|雙魚)', text):
+            reply_text = fetch_horoscope(text)
 
         elif re.search(r'倒數|還有幾天|距離', text):
             reply_text = handle_countdown(text)
