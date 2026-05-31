@@ -41,6 +41,10 @@ def _get_token():
     return token
 
 
+# ─── Nickname cache (10 min TTL) ─────────────────────────
+_nickname_cache = {}  # {user_id: (timestamp, nickname_or_None)}
+_NICKNAME_TTL = 600
+
 # ─── Goals cache (in-process, 5 min TTL) ─────────────────
 _goals_cache = {}  # {cycle_id: (timestamp, {member: [goals]})}
 _GOALS_TTL = 300
@@ -97,6 +101,9 @@ def get_cycle_info(date=None):
 # ─── Nickname ─────────────────────────────────────────────
 
 def get_nickname(user_id):
+    cached = _nickname_cache.get(user_id)
+    if cached and time.time() - cached[0] < _NICKNAME_TTL:
+        return cached[1]
     if not GOAL_SHEET_ID:
         return None
     try:
@@ -104,7 +111,9 @@ def get_nickname(user_id):
         rows = _sheets_get(token, "暱稱!A:B")
         for row in rows[1:]:
             if len(row) >= 2 and row[0] == user_id:
+                _nickname_cache[user_id] = (time.time(), row[1])
                 return row[1]
+        _nickname_cache[user_id] = (time.time(), None)
         return None
     except Exception:
         return None
@@ -119,8 +128,10 @@ def set_nickname(user_id, nickname):
         for i, row in enumerate(rows[1:], 2):
             if len(row) >= 1 and row[0] == user_id:
                 _sheets_update(token, f"暱稱!B{i}", [[nickname]])
+                _nickname_cache[user_id] = (time.time(), nickname)
                 return True
         _sheets_append(token, "暱稱!A:B", [[user_id, nickname]])
+        _nickname_cache[user_id] = (time.time(), nickname)
         return True
     except Exception:
         return False
@@ -234,6 +245,25 @@ def get_today_checkins(cycle_id=None) -> dict:
         return result
     except Exception:
         return {}
+
+
+# ─── Streak ───────────────────────────────────────────────
+
+def get_streak(member, cycle_id=None) -> int:
+    """Returns consecutive days checked in ending at today."""
+    if cycle_id is None:
+        cycle_id, day, _ = get_cycle_info()
+    else:
+        _, day, _ = get_cycle_info()
+    stats = get_checkin_stats(cycle_id)
+    checked = set(stats.get(member, []))
+    streak = 0
+    for d in range(day, 0, -1):
+        if d in checked:
+            streak += 1
+        else:
+            break
+    return streak
 
 
 # ─── Summary ──────────────────────────────────────────────

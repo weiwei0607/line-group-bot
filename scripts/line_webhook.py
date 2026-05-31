@@ -16,7 +16,7 @@ from goal_tracker import (
     get_cycle_info, set_goals, get_goals, add_checkin,
     get_checkin_stats, get_today_checkins, build_summary_text,
     get_nickname, set_nickname, update_last_activity,
-    log_chat_message, get_memories,
+    log_chat_message, get_memories, get_streak,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -315,7 +315,17 @@ def handle_checkin(member, text, user_goals=None):
     if day == 0:
         return "打卡失敗 😢 等一下再試試？"
 
-    # Personalized encouragement if goals exist
+    streak = get_streak(member)
+    streak_msg = ""
+    if streak >= 7:
+        streak_msg = f"🔥🔥 連續 {streak} 天！神人！"
+    elif streak >= 5:
+        streak_msg = f"🔥 連續 {streak} 天！太厲害了！"
+    elif streak >= 3:
+        streak_msg = f"🔥 連續 {streak} 天！繼續衝！"
+    elif streak == 2:
+        streak_msg = "連兩天了！保持！"
+
     if user_goals:
         goals_str = " / ".join(user_goals[:3])
         enc = call_gemini(
@@ -329,12 +339,10 @@ def handle_checkin(member, text, user_goals=None):
         enc = random.choice(["太棒了！", "繼續保持！", "你最行！", "衝衝衝！", "很好！"])
 
     bar = "🟩" * day + "⬜" * (total - day)
-    return (
-        f"✅ {member} 打卡成功！\n"
-        f"📝 {content}\n"
-        f"{bar}\n"
-        f"第 {day}/{total} 天｜{enc}"
-    )
+    parts = [f"✅ {member} 打卡成功！", f"📝 {content}", bar, f"第 {day}/{total} 天｜{enc}"]
+    if streak_msg:
+        parts.append(streak_msg)
+    return "\n".join(parts)
 
 
 def handle_view_goals():
@@ -456,6 +464,26 @@ def handle_message(event):
 
         elif text in ("今天打卡了嗎", "今日打卡", "誰打卡了"):
             reply_text = handle_today_checkins()
+
+        elif text in ("我的打卡", "打卡記錄", "我打了幾天"):
+            cycle_id, day, total = get_cycle_info()
+            stats = get_checkin_stats(cycle_id)
+            checked = sorted(stats.get(member_label, []))
+            streak = get_streak(member_label)
+            if not checked:
+                reply_text = f"你這週期還沒打卡喔！快去打卡 💪\n指令：打卡 今天做了XXX"
+            else:
+                bar = "🟩" * len(checked) + "⬜" * (total - len(checked))
+                days_str = "、".join(f"第{d}天" for d in checked)
+                streak_line = f"🔥 目前連續 {streak} 天" if streak >= 2 else ""
+                lines = [
+                    f"📋 {member_label} 的打卡記錄",
+                    f"{bar}  {len(checked)}/{total} 天",
+                    days_str,
+                ]
+                if streak_line:
+                    lines.append(streak_line)
+                reply_text = "\n".join(lines)
 
         # ── 趣味功能 ──
         elif re.search(r'今日運勢|運勢|占卜', text):

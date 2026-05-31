@@ -14,6 +14,8 @@ from goal_tracker import (
     get_today_checkins, build_summary_text, get_next_cycle_start
 )
 
+MEMBERS = ["太后", "毛毛", "二毛"]
+
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GROUP_ID = os.environ["LINE_GROUP_ID"]
 
@@ -100,9 +102,30 @@ def build_next_cycle_reminder():
     )
 
 
+def build_day1_reminder(cycle_id, total):
+    goals = get_goals(cycle_id)
+    missing = [m for m in MEMBERS if m not in goals]
+    if not missing:
+        return None
+    missing_str = " / ".join(missing)
+    return (
+        f"🎯 新的十日週期開始！（共 {total} 天）\n\n"
+        f"⚠️ {missing_str} 還沒設目標！\n\n"
+        f"指令：設目標：目標1 / 目標2 / 目標3\n"
+        f"趁現在想清楚這十天要做什麼 💪"
+    )
+
+
 def main():
     cycle_id, day, total = get_cycle_info()
     sent = []
+
+    # 第 1 天：催未設目標的人
+    if day == 1:
+        day1_msg = build_day1_reminder(cycle_id, total)
+        if day1_msg:
+            send_line_message(day1_msg)
+            sent.append("day1 goal reminder")
 
     # 每天都發：今日打卡提醒
     daily_msg = build_daily_checkin_reminder(cycle_id, day, total)
