@@ -14,7 +14,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, MemberJoinedEv
 
 from goal_tracker import (
     get_cycle_info, set_goals, get_goals, add_checkin,
-    get_checkin_stats, get_today_checkins, build_summary_text,
+    get_checkin_stats, get_checkin_log, get_today_checkins, build_summary_text,
     get_nickname, set_nickname, update_last_activity,
     log_chat_message, get_memories, get_streak,
     get_last_cycle_id, add_personal_memory, get_personal_memories,
@@ -407,6 +407,23 @@ def handle_checkin(member, text, user_goals=None):
     return "\n".join(parts)
 
 
+def _goal_keyword(goal: str) -> str:
+    """Extract core keyword from goal like '每天duolingo' → 'duolingo'."""
+    key = re.sub(r'^每天\s*', '', goal).strip()
+    key = re.sub(r'一件東西$|一次$|一下$|一個$', '', key).strip()
+    return key or goal
+
+
+def _goal_days(log: dict, goal: str, total: int) -> int:
+    """Count days where any check-in content mentions the goal keyword."""
+    kw = _goal_keyword(goal).lower()
+    count = 0
+    for contents in log.values():
+        if any(kw in c.lower() for c in contents):
+            count += 1
+    return count
+
+
 def handle_view_goals():
     cycle_id, day, total = get_cycle_info()
     goals = get_goals(cycle_id)
@@ -419,18 +436,23 @@ def handle_view_goals():
             f"可設 3–5 個目標"
         )
 
+    log = get_checkin_log(cycle_id)
     lines = [f"🎯 本週期目標（第 {day}/{total} 天）\n"]
     all_members = sorted(set(list(goals.keys()) + list(stats.keys())))
     for member in all_members:
         member_goals = goals.get(member, [])
-        checked = stats.get(member, [])
-        bar = "🟩" * len(checked) + "⬜" * (total - len(checked))
-        lines.append(f"👤 {member}｜{bar} {len(checked)}/{total}")
+        member_log = log.get(member, {})
+        lines.append(f"👤 {member}")
         if member_goals:
-            for i, g in enumerate(member_goals, 1):
-                lines.append(f"  {i}. {g}")
+            for g in member_goals:
+                cnt = _goal_days(member_log, g, total)
+                bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
+                kw = _goal_keyword(g)
+                lines.append(f"  {kw}｜{bar} {cnt}/{total}")
         else:
-            lines.append("  （未設目標）")
+            checked = stats.get(member, [])
+            bar = "🟩" * len(checked) + "⬜" * max(0, total - len(checked))
+            lines.append(f"  打卡｜{bar} {len(checked)}/{total}")
         lines.append("")
     return "\n".join(lines).strip()
 

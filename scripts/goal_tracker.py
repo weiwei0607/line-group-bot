@@ -227,6 +227,25 @@ def get_checkin_stats(cycle_id=None) -> dict:
         return {}
 
 
+def get_checkin_log(cycle_id=None) -> dict:
+    """Returns {member: {day: [content, ...]}} for content-based goal matching."""
+    if not GOAL_SHEET_ID:
+        return {}
+    try:
+        token = _get_token()
+        if cycle_id is None:
+            cycle_id, _, _ = get_cycle_info()
+        rows = _sheets_get(token, "打卡!A:E")
+        result = {}
+        for row in rows[1:]:
+            if len(row) >= 5 and row[1] == cycle_id:
+                member, day, content = row[3], int(row[2]), row[4]
+                result.setdefault(member, {}).setdefault(day, []).append(content)
+        return result
+    except Exception:
+        return {}
+
+
 def get_today_checkins(cycle_id=None) -> dict:
     """Returns {member: content} for today's check-ins only."""
     if not GOAL_SHEET_ID:
