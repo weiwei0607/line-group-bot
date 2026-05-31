@@ -31,9 +31,23 @@ CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
-RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
 NASA_API_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY")
-NINJA_API_KEY = os.environ.get("NINJA_API_KEY", "")
+
+# 支援多把 key 輪班：RAPIDAPI_KEY, RAPIDAPI_KEY_2, RAPIDAPI_KEY_3 ...
+RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")  # kept for compat
+_RAPIDAPI_KEYS = [k for k in [
+    os.environ.get("RAPIDAPI_KEY", ""),
+    os.environ.get("RAPIDAPI_KEY_2", ""),
+    os.environ.get("RAPIDAPI_KEY_3", ""),
+] if k]
+
+# 支援多把 key 輪班：NINJA_API_KEY, NINJA_API_KEY_2 ...
+NINJA_API_KEY = os.environ.get("NINJA_API_KEY", "")  # kept for compat
+_NINJA_KEYS = [k for k in [
+    os.environ.get("NINJA_API_KEY", ""),
+    os.environ.get("NINJA_API_KEY_2", ""),
+    os.environ.get("NINJA_API_KEY_3", ""),
+] if k]
 BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
 BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 MEMBERS = ["太后", "毛毛", "二毛"]
@@ -355,43 +369,60 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
 _QUOTA = object()  # sentinel: API quota exceeded
 _QUOTA_MSG = "😅 今天 API 額度用完囉，明天再來試試！"
 
+_rapid_idx = 0   # round-robin index for RapidAPI keys
+_ninja_idx = 0   # round-robin index for API Ninjas keys
+
 
 def _rapid(method: str, host: str, path: str, **kwargs):
-    if not RAPIDAPI_KEY:
+    global _rapid_idx
+    if not _RAPIDAPI_KEYS:
         return None
-    headers = {"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": host}
-    headers.update(kwargs.pop("headers", {}))
-    try:
-        r = getattr(requests, method)(
-            f"https://{host}{path}", headers=headers, timeout=10, **kwargs
-        )
-        if r.status_code == 429:
-            print(f"[RapidAPI] 429 quota exceeded: {host}{path}")
-            return _QUOTA
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"[RapidAPI] {host}{path} → {e}")
-        return None
+    extra_headers = kwargs.pop("headers", {})
+    n = len(_RAPIDAPI_KEYS)
+    for attempt in range(n):
+        key = _RAPIDAPI_KEYS[(_rapid_idx + attempt) % n]
+        headers = {"x-rapidapi-key": key, "x-rapidapi-host": host, **extra_headers}
+        try:
+            r = getattr(requests, method)(
+                f"https://{host}{path}", headers=headers, timeout=10, **kwargs
+            )
+            if r.status_code == 429:
+                print(f"[RapidAPI] 429 key {(_rapid_idx+attempt)%n+1}/{n}: {host}{path}")
+                continue  # try next key
+            r.raise_for_status()
+            _rapid_idx = (_rapid_idx + attempt + 1) % n  # advance after success
+            return r.json()
+        except Exception as e:
+            print(f"[RapidAPI] {host}{path} → {e}")
+            return None
+    print(f"[RapidAPI] all {n} keys quota exceeded: {host}{path}")
+    return _QUOTA
 
 
 def _ninja(path: str, **kwargs):
-    """Call api-ninjas.com directly with NINJA_API_KEY, fall back to RapidAPI."""
-    if NINJA_API_KEY:
+    global _ninja_idx
+    if not _NINJA_KEYS:
+        return _rapid("get", "api-ninjas.p.rapidapi.com", path, **kwargs)
+    n = len(_NINJA_KEYS)
+    for attempt in range(n):
+        key = _NINJA_KEYS[(_ninja_idx + attempt) % n]
         try:
             r = requests.get(
                 f"https://api.api-ninjas.com{path}",
-                headers={"X-Api-Key": NINJA_API_KEY},
+                headers={"X-Api-Key": key},
                 timeout=10,
                 **kwargs,
             )
             if r.status_code == 429:
-                print(f"[api-ninjas] 429 quota exceeded: {path}")
-                return _QUOTA
+                print(f"[api-ninjas] 429 key {(_ninja_idx+attempt)%n+1}/{n}: {path}")
+                continue  # try next key
             r.raise_for_status()
+            _ninja_idx = (_ninja_idx + attempt + 1) % n  # advance after success
             return r.json()
         except Exception as e:
             print(f"[api-ninjas] {path} → {e}")
+            return None
+    # all ninja keys exhausted, fall back to RapidAPI
     return _rapid("get", "api-ninjas.p.rapidapi.com", path, **kwargs)
 
 
