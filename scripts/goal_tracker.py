@@ -139,12 +139,13 @@ def set_nickname(user_id, nickname):
 
 # ─── Goals ────────────────────────────────────────────────
 
-def set_goals(member, goals: list) -> bool:
+def set_goals(member, goals: list, cycle_id: str | None = None) -> bool:
     if not GOAL_SHEET_ID:
         return False
     try:
         token = _get_token()
-        cycle_id, _, _ = get_cycle_info()
+        if cycle_id is None:
+            cycle_id, _, _ = get_cycle_info()
         now_str = _now().strftime("%Y-%m-%d %H:%M")
         goals_str = " / ".join(g.strip() for g in goals if g.strip())
 
@@ -152,7 +153,7 @@ def set_goals(member, goals: list) -> bool:
         for i, row in enumerate(rows[1:], 2):
             if len(row) >= 2 and row[0] == cycle_id and row[1] == member:
                 _sheets_update(token, f"目標!C{i}:D{i}", [[goals_str, now_str]])
-                _goals_cache.pop(cycle_id, None)  # invalidate cache
+                _goals_cache.pop(cycle_id, None)
                 return True
 
         _sheets_append(token, "目標!A:D", [[cycle_id, member, goals_str, now_str]])
@@ -287,6 +288,19 @@ def get_streak(member, cycle_id=None) -> int:
 
 # ─── Cycle helpers ───────────────────────────────────────
 
+def get_next_cycle_id() -> str:
+    now = _now()
+    d, y, m = now.day, now.year, now.month
+    if d <= 10:
+        return f"{y}-{m:02d}-11"
+    elif d <= 20:
+        return f"{y}-{m:02d}-21"
+    else:
+        next_m = m + 1 if m < 12 else 1
+        next_y = y if m < 12 else y + 1
+        return f"{next_y}-{next_m:02d}-01"
+
+
 def get_cycle_total(cycle_id) -> int:
     """Returns total days in a cycle given its ID like '2026-05-01'."""
     y, m, start = (int(x) for x in cycle_id.split('-'))
@@ -311,6 +325,18 @@ def get_last_cycle_id() -> str:
 
 # ─── Summary ──────────────────────────────────────────────
 
+def _goal_keyword(goal: str) -> str:
+    import re as _re
+    key = _re.sub(r'^每天\s*', '', goal).strip()
+    key = _re.sub(r'一件東西$|一次$|一下$|一個$', '', key).strip()
+    return key or goal
+
+
+def _goal_days_from_log(member_log: dict, goal: str) -> int:
+    kw = _goal_keyword(goal).lower()
+    return sum(1 for contents in member_log.values() if any(kw in c.lower() for c in contents))
+
+
 def build_summary_text(cycle_id=None) -> str:
     if cycle_id is None:
         cycle_id, day, total = get_cycle_info()
@@ -318,21 +344,26 @@ def build_summary_text(cycle_id=None) -> str:
         day, total = 0, get_cycle_total(cycle_id)
 
     goals = get_goals(cycle_id)
+    log = get_checkin_log(cycle_id)
     stats = get_checkin_stats(cycle_id)
     all_members = sorted(set(list(goals.keys()) + list(stats.keys())))
 
     lines = [f"📊 十日目標週期總結（{cycle_id}）\n"]
     for member in all_members:
         member_goals = goals.get(member, [])
-        checked_days = sorted(stats.get(member, []))
-        count = len(checked_days)
-        emoji = "🏆" if count >= total * 0.8 else ("✅" if count >= total * 0.5 else "⚠️")
-        lines.append(f"{emoji} {member}（{count}/{total} 天）")
+        member_log = log.get(member, {})
+        lines.append(f"👤 {member}")
         if member_goals:
-            for i, g in enumerate(member_goals, 1):
-                lines.append(f"  目標 {i}：{g}")
+            for g in member_goals:
+                cnt = _goal_days_from_log(member_log, g)
+                bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
+                kw = _goal_keyword(g)
+                emoji = "🏆" if cnt >= total * 0.8 else ("✅" if cnt >= total * 0.5 else "⚠️")
+                lines.append(f"  {emoji} {kw}｜{bar} {cnt}/{total}")
         else:
-            lines.append("  （未設目標）")
+            checked = len(stats.get(member, []))
+            bar = "🟩" * checked + "⬜" * max(0, total - checked)
+            lines.append(f"  打卡｜{bar} {checked}/{total}")
         lines.append("")
 
     lines.append("大家這十天辛苦了！下個週期繼續加油 💪")

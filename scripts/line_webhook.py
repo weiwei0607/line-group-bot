@@ -17,7 +17,8 @@ from goal_tracker import (
     get_checkin_stats, get_checkin_log, get_today_checkins, build_summary_text,
     get_nickname, set_nickname, update_last_activity,
     log_chat_message, get_memories, get_streak,
-    get_last_cycle_id, add_personal_memory, get_personal_memories,
+    get_last_cycle_id, get_next_cycle_id, get_next_cycle_start,
+    add_personal_memory, get_personal_memories,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -557,12 +558,20 @@ def handle_set_goals(member, text):
         return "沒讀到目標，試試：設目標：目標1 / 目標2 / 目標3"
 
     cycle_id, day, total = get_cycle_info()
-
-    def _do_set():
-        set_goals(member, goals)
-    threading.Thread(target=_do_set, daemon=True).start()
-
     goals_preview = "\n".join(f"  {i+1}. {g}" for i, g in enumerate(goals))
+
+    if day >= total:
+        # 最後一天：存到下一週期
+        next_id = get_next_cycle_id()
+        next_start = get_next_cycle_start()
+        threading.Thread(target=set_goals, args=(member, goals, next_id), daemon=True).start()
+        return (
+            f"✅ {member} 的下輪目標設定完成！\n\n"
+            f"{goals_preview}\n\n"
+            f"📅 {next_start} 週期開始生效 🎯"
+        )
+
+    threading.Thread(target=set_goals, args=(member, goals), daemon=True).start()
     return (
         f"✅ {member} 的十日目標設定完成！\n\n"
         f"{goals_preview}\n\n"
