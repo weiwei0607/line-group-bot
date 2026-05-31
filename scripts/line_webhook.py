@@ -53,6 +53,9 @@ _SKIP_LOG = {
     "抽寶可夢", "今日寶可夢", "給我建議", "今日忠告",
     "今日食譜", "隨機食譜", "推薦電影", "今日電影", "隨機電影",
     "待辦", "查提醒", "查待辦",
+    "找歌", "查電影", "電影台詞", "在哪看",
+    "今日運動", "找運動", "來一題", "今日調酒",
+    "動漫語錄", "我好無聊", "川普語錄", "隨機梗圖", "諾里斯",
 }
 
 
@@ -340,6 +343,391 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
         return text, url
     except Exception:
         return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
+
+
+# ─── RapidAPI 共用 helper ─────────────────────────────────
+
+def _rapid(method: str, host: str, path: str, **kwargs):
+    if not RAPIDAPI_KEY:
+        return None
+    headers = {"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": host}
+    headers.update(kwargs.pop("headers", {}))
+    try:
+        r = getattr(requests, method)(
+            f"https://{host}{path}", headers=headers, timeout=10, **kwargs
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[RapidAPI] {host}{path} → {e}")
+        return None
+
+
+# ─── Translation ──────────────────────────────────────────
+
+_TRANSLATE_PENDING: dict = {}
+
+_LANG_MAP = {
+    "日文": "ja", "日語": "ja",
+    "英文": "en", "英語": "en",
+    "韓文": "ko", "韓語": "ko",
+    "義大利文": "it", "意大利文": "it",
+    "法文": "fr", "法語": "fr",
+    "西班牙文": "es", "西語": "es",
+    "德文": "de", "德語": "de",
+    "泰文": "th", "泰語": "th",
+    "越南文": "vi",
+    "葡文": "pt", "葡萄牙文": "pt",
+    "俄文": "ru",
+    "繁中": "zh-TW", "繁體中文": "zh-TW",
+    "簡中": "zh-CN", "簡體中文": "zh-CN",
+    "阿拉伯文": "ar",
+}
+_LANG_DISPLAY = {v: k for k, v in list(_LANG_MAP.items())}
+
+
+def translate_text(text: str, target_lang: str) -> str:
+    d = _rapid(
+        "post", "text-translator2.p.rapidapi.com", "/translate",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={"source_language": "auto", "target_language": target_lang, "text": text},
+    )
+    if not d:
+        return "翻譯失敗，等一下再試 😢"
+    translated = (d.get("data") or {}).get("translatedText", "")
+    if not translated:
+        return "翻譯失敗，等一下再試 😢"
+    lang_name = _LANG_DISPLAY.get(target_lang, target_lang)
+    return f"🌐 {lang_name}\n{translated}"
+
+
+def handle_translate(user_id: str, text: str) -> str:
+    m = re.match(r'^翻\s+(\S+)\s+(.+)', text)
+    if m:
+        code = _LANG_MAP.get(m.group(1))
+        if not code:
+            return f"不認識「{m.group(1)}」\n支援：{'、'.join(list(_LANG_MAP.keys())[:10])}..."
+        return translate_text(m.group(2), code)
+    m = re.match(r'^翻\s+(\S+)$', text)
+    if m:
+        code = _LANG_MAP.get(m.group(1))
+        if not code:
+            return f"不認識「{m.group(1)}」\n支援：{'、'.join(list(_LANG_MAP.keys())[:10])}..."
+        _TRANSLATE_PENDING[user_id] = code
+        return f"要翻成{m.group(1)}，請傳要翻的文字 👇\n（傳「取消」取消）"
+    langs = "、".join(list(_LANG_MAP.keys())[:8]) + "..."
+    return f"格式：翻 日文 要翻的文字\n支援：{langs}"
+
+
+# ─── Weather upgrade ──────────────────────────────────────
+
+def get_weather_v2(text: str) -> str:
+    city = "台北"
+    for c in TW_CITIES:
+        if c in text:
+            city = c
+            break
+    d = _rapid("get", "weatherapi-com.p.rapidapi.com", "/current.json",
+               params={"q": city, "lang": "zh"})
+    if not d:
+        return get_weather(text)
+    try:
+        loc = d["location"]["name"]
+        cur = d["current"]
+        return (
+            f"🌤 {loc} 天氣\n"
+            f"{cur['condition']['text']}　{cur['temp_c']}°C"
+            f"（體感 {cur['feelslike_c']}°C）\n"
+            f"濕度 {cur['humidity']}%　風速 {cur['wind_kph']} km/h"
+        )
+    except Exception:
+        return get_weather(text)
+
+
+# ─── Music ───────────────────────────────────────────────
+
+def fetch_spotify_track(query: str) -> str:
+    d = _rapid("get", "spotify23.p.rapidapi.com", "/search",
+               params={"q": query, "type": "tracks", "numberOfTopResults": "3"})
+    if not d:
+        return f"🎵 找不到「{query}」😢"
+    try:
+        items = d.get("tracks", {}).get("items", [])
+        if not items:
+            return f"🎵 找不到「{query}」相關的歌"
+        lines = ["🎵 找到以下歌曲：\n"]
+        for t in items[:3]:
+            data = t.get("data", {})
+            name = data.get("name", "")
+            artists = data.get("artists", {}).get("items", [])
+            artist = artists[0].get("profile", {}).get("name", "") if artists else ""
+            lines.append(f"• {name} — {artist}")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[spotify] {e}")
+        return f"🎵 找不到「{query}」😢"
+
+
+# ─── Movies ──────────────────────────────────────────────
+
+def fetch_imdb(title: str) -> str:
+    d = _rapid("get", "imdb8.p.rapidapi.com", "/title/find", params={"q": title})
+    if not d:
+        return f"🎬 查不到「{title}」😢"
+    try:
+        results = d.get("results", [])
+        if not results:
+            return f"🎬 找不到「{title}」"
+        m = results[0]
+        year = m.get("year", "")
+        rating = m.get("starRating", {}).get("ratingValue", "")
+        title_str = m.get("title", "")
+        return (
+            f"🎬 {title_str}（{year}）\n"
+            f"⭐ {rating}/10" if rating else f"🎬 {title_str}（{year}）"
+        )
+    except Exception as e:
+        print(f"[imdb] {e}")
+        return f"🎬 查不到「{title}」😢"
+
+
+def fetch_movie_quote() -> str:
+    d = _rapid("get", "movie-quote.p.rapidapi.com", "/", params={"count": "1"})
+    if not d:
+        return "🎬 沒有台詞，待會再試"
+    try:
+        q = d[0] if isinstance(d, list) else d
+        content = q.get("quoteText") or q.get("quote", "")
+        movie = q.get("quoteMovie") or q.get("movie", "")
+        if not content:
+            return "🎬 沒有台詞，待會再試"
+        return f"🎬 「{content}」\n—《{movie}》"
+    except Exception:
+        return "🎬 沒有台詞，待會再試"
+
+
+def fetch_streaming(title: str) -> str:
+    for country in ["tw", "us"]:
+        d = _rapid("get", "streaming-availability.p.rapidapi.com", "/shows/search/title",
+                   params={"title": title, "country": country})
+        if d:
+            break
+    if not d:
+        return f"🍿 找不到「{title}」的串流資訊"
+    try:
+        items = d if isinstance(d, list) else [d]
+        if not items:
+            return f"🍿「{title}」目前沒有串流上架"
+        show = items[0]
+        title_show = show.get("title", title)
+        services = show.get("streamingInfo", {})
+        if not services:
+            return f"🍿《{title_show}》目前沒有串流上架"
+        lines = [f"🍿《{title_show}》可在："]
+        for svc in list(services.keys())[:5]:
+            lines.append(f"  • {svc.capitalize()}")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[streaming] {e}")
+        return "🍿 查詢失敗，待會再試 😢"
+
+
+# ─── Exercise ────────────────────────────────────────────
+
+_BODY_PARTS = {
+    "背部": "back", "胸部": "chest", "腿部": "upper legs",
+    "手臂": "upper arms", "肩膀": "shoulders", "腹部": "waist",
+    "有氧": "cardio", "小腿": "lower legs",
+}
+
+
+def fetch_exercise(body_part: str = None) -> str:
+    if body_part:
+        en = _BODY_PARTS.get(body_part, body_part)
+        data = _rapid("get", "exercisedb.p.rapidapi.com", f"/exercises/bodyPart/{en}",
+                      params={"limit": "15", "offset": "0"})
+    else:
+        data = _rapid("get", "exercisedb.p.rapidapi.com", "/exercises",
+                      params={"limit": "20", "offset": str(random.randint(0, 800))})
+    if not data or not isinstance(data, list):
+        return "💪 找不到運動，待會再試"
+    ex = random.choice(data)
+    name = ex.get("name", "")
+    bp = ex.get("bodyPart", "")
+    target = ex.get("target", "")
+    equipment = ex.get("equipment", "")
+    return (
+        f"💪 今日運動：{name}\n"
+        f"部位：{bp}　目標：{target}\n"
+        f"器材：{'徒手' if equipment == 'body weight' else equipment}"
+    )
+
+
+# ─── Trivia ──────────────────────────────────────────────
+
+def fetch_trivia() -> str:
+    d = _rapid("get", "api-ninjas.p.rapidapi.com", "/v1/trivia")
+    if not d or not isinstance(d, list):
+        return "🧠 題庫暫時關閉，待會再試"
+    q = d[0]
+    return (
+        f"🧠 來一題！（{q.get('category', '')}）\n\n"
+        f"{q.get('question', '')}\n\n"
+        f"答案：{q.get('answer', '')}"
+    )
+
+
+# ─── Cocktail ────────────────────────────────────────────
+
+def fetch_cocktail(name: str = None) -> str:
+    params = {"name": name} if name else {}
+    d = _rapid("get", "api-ninjas.p.rapidapi.com", "/v1/cocktail", params=params)
+    if d and isinstance(d, list):
+        c = d[0]
+        return (
+            f"🍹 今日調酒：{c.get('name', '')}\n"
+            f"材料：{'、'.join(c.get('ingredients', [])[:5])}\n"
+            f"做法：{(c.get('instructions') or '')[:100]}..."
+        )
+    # Fallback to TheCocktailDB
+    try:
+        r = requests.get("https://www.thecocktaildb.com/api/json/v1/1/random.php", timeout=8)
+        drink = r.json()["drinks"][0]
+        ings = [drink.get(f"strIngredient{i}", "") for i in range(1, 8) if drink.get(f"strIngredient{i}")]
+        return (
+            f"🍹 今日調酒：{drink['strDrink']}（{drink.get('strCategory', '')}）\n"
+            f"材料：{'、'.join(ings[:5])}\n"
+            f"做法：{(drink.get('strInstructions') or '')[:100]}..."
+        )
+    except Exception:
+        return "🍹 調酒師不在，待會再試"
+
+
+# ─── Anime Quotes ────────────────────────────────────────
+
+def fetch_anime_quote() -> str:
+    d = _rapid("get", "anime-quotes4.p.rapidapi.com", "/")
+    if not d:
+        return "🌸 動漫語錄暫時失靈，待會再試"
+    try:
+        item = random.choice(d) if isinstance(d, list) else d
+        quote = item.get("quote") or item.get("content", "")
+        char = item.get("char") or item.get("character", "")
+        anime = item.get("anime", "")
+        if not quote:
+            return "🌸 動漫語錄暫時失靈，待會再試"
+        line = f"🌸 「{quote}」"
+        if char:
+            line += f"\n— {char}"
+        if anime:
+            line += f"《{anime}》"
+        return line
+    except Exception:
+        return "🌸 動漫語錄暫時失靈，待會再試"
+
+
+# ─── Random Activity ─────────────────────────────────────
+
+_FALLBACK_ACTIVITIES = [
+    "整理一個抽屜或衣櫃 🗂️",
+    "寫一封信給未來的自己 ✉️",
+    "學 3 個新單字（任何語言）📚",
+    "做 10 分鐘伸展 🧘",
+    "畫一幅塗鴉，不管好不好看 🎨",
+    "整理手機相簿，刪掉 10 張沒用的照片 📱",
+    "讀一篇你一直想讀的文章 📰",
+    "打電話給好久不見的朋友 📞",
+]
+
+
+def fetch_random_activity() -> str:
+    d = _rapid("get", "bored-api.p.rapidapi.com", "/api/activity")
+    if d and d.get("activity"):
+        return (
+            f"🎲 無聊的話可以：\n{d['activity']}\n"
+            f"類型：{d.get('type', '')}　人數：{d.get('participants', 1)}"
+        )
+    return f"🎲 無聊的話可以：\n{random.choice(_FALLBACK_ACTIVITIES)}"
+
+
+# ─── Trump Quotes ────────────────────────────────────────
+
+def fetch_trump_quote() -> str:
+    try:
+        r = requests.get("https://api.tronalddump.io/random/quote", timeout=8,
+                         headers={"Accept": "application/json"})
+        quote = r.json().get("value", "")
+        if quote:
+            return f"🦅 川普語錄\n「{quote}」"
+    except Exception:
+        pass
+    return "🦅 川普去打高爾夫了，待會再問"
+
+
+# ─── SuperHero ───────────────────────────────────────────
+
+def fetch_superhero(name: str) -> str:
+    d = _rapid("get", "superhero-search.p.rapidapi.com", f"/api/{name}")
+    if not d:
+        return f"🦸 找不到「{name}」，試試英文名字"
+    try:
+        hero = d[0] if isinstance(d, list) else d
+        hname = hero.get("name", name)
+        bio = hero.get("biography") or {}
+        stats = hero.get("powerstats") or {}
+        alignment = bio.get("alignment", "")
+        align = "英雄 🦸" if alignment == "good" else ("反派 🦹" if alignment == "bad" else "😐")
+        return (
+            f"🦸 {hname}（{bio.get('publisher', '')}）{align}\n"
+            f"力量 {stats.get('strength', '?')}　速度 {stats.get('speed', '?')}\n"
+            f"智力 {stats.get('intelligence', '?')}　能量 {stats.get('power', '?')}"
+        )
+    except Exception as e:
+        print(f"[superhero] {e}")
+        return f"🦸 查不到「{name}」，試試英文名字"
+
+
+# ─── Meme ────────────────────────────────────────────────
+
+def fetch_meme() -> tuple:
+    d = _rapid("get", "memeados.p.rapidapi.com", "/rdmeme/")
+    if d:
+        try:
+            url = d.get("url") or d.get("image", "")
+            title = d.get("title", "")
+            if url and url.startswith("http"):
+                return (f"😂 {title}" if title else "😂 今日梗圖"), url
+        except Exception:
+            pass
+    return "😂 梗圖機壞了，待會再試", None
+
+
+# ─── Chuck Norris ─────────────────────────────────────────
+
+def fetch_chuck_norris() -> str:
+    try:
+        r = requests.get("https://api.chucknorris.io/jokes/random", timeout=8)
+        joke = r.json().get("value", "")
+        if joke:
+            return f"💪 查克諾里斯冷知識\n{joke}"
+    except Exception:
+        pass
+    return "💪 查克諾里斯太強了，API 被他打掛了"
+
+
+# ─── TLDR ────────────────────────────────────────────────
+
+def fetch_tldr(text: str) -> str:
+    d = _rapid(
+        "post", "tldrthis.p.rapidapi.com", "/v1/article/summarize/",
+        headers={"Content-Type": "application/json"},
+        json={"article_html": text, "max_sentences": 3},
+    )
+    if d:
+        sentences = d.get("summary", [])
+        if sentences:
+            return "📝 摘要：\n" + " ".join(sentences)
+    return call_gemini(f"請用 3 句話摘要以下文字：\n{text[:1000]}") or "摘要失敗 😢"
 
 
 def handle_pairing(text) -> str:
@@ -859,42 +1247,42 @@ def handle_message(event):
                 "\n🎯 十日目標\n"
                 "設目標：目標1 / 目標2\n"
                 "打卡 今天做了XXX\n"
-                "查目標\n"
-                "進度\n"
-                "今日打卡\n"
-                "我的打卡\n"
-                "上週期\n"
+                "查目標 / 進度 / 今日打卡\n"
+                "我的打卡 / 上週期\n"
                 "幫我想目標\n"
                 "\n📌 待辦提醒\n"
                 "提醒我 明天 要做XXX\n"
-                "提醒 太后 6/5 要做XXX\n"
-                "待辦\n"
-                "完成待辦 XXX\n"
+                "待辦 / 完成待辦 XXX\n"
                 "\n🎲 趣味\n"
-                "今日運勢\n"
-                "今日天蠍（任意星座）\n"
-                "誰請客\n"
-                "抽籤 選項A / 選項B\n"
-                "配對 A B\n"
-                "搖骰子 / 搖3顆\n"
-                "猜拳 剪刀\n"
-                "貓貓 / 來隻貓\n"
-                "狗狗 / 來隻狗\n"
-                "狐狸\n"
-                "柴柴\n"
-                "熊貓\n"
-                "無尾熊\n"
-                "浣熊\n"
-                "今日宇宙\n"
-                "抽寶可夢\n"
-                "今日食譜\n"
-                "推薦電影\n"
-                "冷笑話\n"
-                "冷知識\n"
-                "給我建議\n"
+                "今日運勢 / 今日天蠍（任意星座）\n"
+                "誰請客 / 抽籤 A / B\n"
+                "配對 A B / 搖骰子 / 猜拳 剪刀\n"
+                "貓貓 / 狗狗 / 狐狸 / 柴柴\n"
+                "熊貓 / 無尾熊 / 浣熊\n"
+                "今日宇宙 / 抽寶可夢\n"
+                "今日食譜 / 推薦電影\n"
+                "冷笑話 / 冷知識 / 給我建議\n"
+                "\n🎵 媒體 & 娛樂\n"
+                "找歌 [歌名]\n"
+                "查電影 [片名]\n"
+                "電影台詞\n"
+                "在哪看 [片名]\n"
+                "動漫語錄\n"
+                "川普語錄\n"
+                "隨機梗圖\n"
+                "諾里斯\n"
+                "\n💪 生活\n"
+                "今日運動 / 找運動 [部位]\n"
+                "今日調酒 / 今日調酒 馬丁尼\n"
+                "來一題（隨機問答）\n"
+                "我好無聊\n"
+                "\n🌐 翻譯\n"
+                "翻 日文 [文字]\n"
+                "翻 英文 [文字]\n"
+                "（支援：日/英/韓/法/西/德/泰/越等）\n"
+                "摘要 [長文]\n"
                 "\n🔧 實用\n"
-                "匯率\n"
-                "天氣\n"
+                "匯率 / 天氣 [城市]\n"
                 "倒數 6/15\n"
                 "XXX日文怎麼說\n"
                 "叫我 [暱稱]\n"
@@ -1041,7 +1429,75 @@ def handle_message(event):
             reply_text = get_exchange_rate(text)
 
         elif re.search(r'天氣', text):
-            reply_text = get_weather(text)
+            reply_text = get_weather_v2(text)
+
+        # ── 翻譯 ──
+        elif re.match(r'^翻\s', text):
+            reply_text = handle_translate(user_id, text)
+
+        # ── 找歌 ──
+        elif m := re.match(r'^找歌\s*(.+)$', text):
+            reply_text = fetch_spotify_track(m.group(1).strip())
+
+        # ── 查電影 ──
+        elif m := re.match(r'^查電影\s*(.+)$', text):
+            reply_text = fetch_imdb(m.group(1).strip())
+
+        # ── 電影台詞 ──
+        elif text == "電影台詞":
+            reply_text = fetch_movie_quote()
+
+        # ── 在哪看 ──
+        elif m := re.match(r'^在哪看\s*(.+)$', text):
+            reply_text = fetch_streaming(m.group(1).strip())
+
+        # ── 今日運動 / 找運動 ──
+        elif re.match(r'^(今日運動|找運動)', text):
+            body_part = None
+            m2 = re.match(r'^找運動\s*(.+)$', text)
+            if m2:
+                body_part = m2.group(1).strip()
+            reply_text = fetch_exercise(body_part)
+
+        # ── 來一題 ──
+        elif text == "來一題":
+            reply_text = fetch_trivia()
+
+        # ── 今日調酒 ──
+        elif re.match(r'^今日調酒', text):
+            m2 = re.match(r'^今日調酒\s*(.+)$', text)
+            name = m2.group(1).strip() if m2 else None
+            reply_text = fetch_cocktail(name)
+
+        # ── 動漫語錄 ──
+        elif text == "動漫語錄":
+            reply_text = fetch_anime_quote()
+
+        # ── 我好無聊 ──
+        elif text == "我好無聊":
+            reply_text = fetch_random_activity()
+
+        # ── 川普語錄 ──
+        elif text == "川普語錄":
+            reply_text = fetch_trump_quote()
+
+        # ── 查超英 ──
+        elif m := re.match(r'^查超英\s*(.+)$', text):
+            reply_text = fetch_superhero(m.group(1).strip())
+
+        # ── 隨機梗圖 ──
+        elif text == "隨機梗圖":
+            meme_text, meme_url = fetch_meme()
+            reply_text = meme_text
+            reply_image_url = meme_url
+
+        # ── 諾里斯 ──
+        elif text == "諾里斯":
+            reply_text = fetch_chuck_norris()
+
+        # ── 摘要 ──
+        elif m := re.match(r'^摘要\s*(.+)$', text, re.DOTALL):
+            reply_text = fetch_tldr(m.group(1).strip())
 
         # ── 日文問題 ──
         elif (jp := handle_japanese_question(text)):
@@ -1068,6 +1524,15 @@ def handle_message(event):
 
         elif re.search(r'出去玩|要去玩|去旅遊|旅行', text) and random.random() < 0.7:
             reply_text = handle_travel(text)
+
+        # ── 待翻譯輸入 ──
+        elif user_id and user_id in _TRANSLATE_PENDING:
+            if text in ("取消", "算了", "不翻了"):
+                _TRANSLATE_PENDING.pop(user_id, None)
+                reply_text = "好，取消翻譯 👌"
+            else:
+                lang_code = _TRANSLATE_PENDING.pop(user_id)
+                reply_text = translate_text(text, lang_code)
 
         # ── 被點名 ──
         elif (BOT_NAME in text or BOT_DISPLAY_NAME in text
