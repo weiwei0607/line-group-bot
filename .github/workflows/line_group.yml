@@ -1,0 +1,21 @@
+name: LINE Group Daily Message
+
+"on":
+  schedule:
+    - cron: '0 3 * * *'   # 每天 11:00 CST
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - run: python scripts/line_group.py
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
