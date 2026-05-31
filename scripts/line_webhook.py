@@ -106,7 +106,7 @@ def get_weather(text):
             break
     try:
         resp = requests.get(
-            f"https://wttr.in/{city}?format=3&lang=zh", timeout=8
+            f"https://wttr.in/{city}?format=3&lang=zh&m", timeout=8
         )
         weather = resp.text.strip()
         return f"🌤 {weather}\n（資料來源：wttr.in）"
