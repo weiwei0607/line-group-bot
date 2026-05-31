@@ -434,7 +434,7 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
         )
         d = r.json()
         title = d.get("title", "")
-        explanation = (d.get("explanation") or "")[:100]
+        explanation = (d.get("explanation") or "")[:400]
         media_type = d.get("media_type", "image")
         url = d.get("url", "") if media_type == "image" else None
         text = f"🌌 今日宇宙：{title}\n{explanation}..."
@@ -747,7 +747,7 @@ def fetch_cocktail(name: str = None) -> str:
         return (
             f"🍹 今日調酒：{c.get('name', '')}\n"
             f"材料：{'、'.join(c.get('ingredients', [])[:5])}\n"
-            f"做法：{(c.get('instructions') or '')[:100]}..."
+            f"做法：{(c.get('instructions') or '')[:400]}..."
         )
     # Fallback to TheCocktailDB
     try:
@@ -757,7 +757,7 @@ def fetch_cocktail(name: str = None) -> str:
         return (
             f"🍹 今日調酒：{drink['strDrink']}（{drink.get('strCategory', '')}）\n"
             f"材料：{'、'.join(ings[:5])}\n"
-            f"做法：{(drink.get('strInstructions') or '')[:100]}..."
+            f"做法：{(drink.get('strInstructions') or '')[:400]}..."
         )
     except Exception:
         return "🍹 調酒師不在，待會再試"
