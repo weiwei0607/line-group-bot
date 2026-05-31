@@ -114,6 +114,37 @@ def get_weather(text):
         return f"天氣查詢失敗，去 Google 查 {city} 天氣吧 😅"
 
 
+def get_exchange_rate(text):
+    pairs = [
+        ("USD", "TWD", "美金", "$"),
+        ("JPY", "TWD", "日幣", "¥"),
+        ("EUR", "TWD", "歐元", "€"),
+        ("KRW", "TWD", "韓元", "₩"),
+    ]
+    targets = []
+    for code, to, name, symbol in pairs:
+        if name in text or code in text.upper():
+            targets.append((code, name, symbol))
+    if not targets:
+        targets = [("USD", "美金", "$"), ("JPY", "日幣", "¥")]
+
+    try:
+        lines = ["💱 即時匯率（對台幣）\n"]
+        for code, name, symbol in targets:
+            resp = requests.get(
+                f"https://open.er-api.com/v6/latest/{code}", timeout=8
+            )
+            data = resp.json()
+            twd = data["rates"].get("TWD", 0)
+            if code == "JPY":
+                lines.append(f"  {symbol} 100 {name} = {twd*100:.2f} 台幣")
+            else:
+                lines.append(f"  {symbol} 1 {name} = {twd:.2f} 台幣")
+        return "\n".join(lines)
+    except Exception:
+        return "匯率查詢失敗 😢 試試 Google 匯率"
+
+
 # ─── Auto-reply handlers ───────────────────────────────────
 
 def handle_joke(_text):
@@ -364,6 +395,9 @@ def handle_message(event):
 
         elif re.search(r'冷知識', text):
             reply_text = handle_fun_fact(text)
+
+        elif re.search(r'匯率|美金|日幣|換錢|外幣', text):
+            reply_text = get_exchange_rate(text)
 
         elif re.search(r'天氣', text):
             reply_text = get_weather(text)
