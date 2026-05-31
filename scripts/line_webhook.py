@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 import random
 import threading
 import requests
@@ -9,10 +10,13 @@ from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi,
+    Configuration, ApiClient, MessagingApi, MessagingApiBlob,
     ReplyMessageRequest, TextMessage, ImageMessage
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent, MemberJoinedEvent
+from linebot.v3.webhooks import (
+    MessageEvent, TextMessageContent, MemberJoinedEvent,
+    AudioMessageContent, ImageMessageContent,
+)
 
 from goal_tracker import (
     get_cycle_info, set_goals, get_goals, add_checkin,
@@ -73,8 +77,12 @@ _SKIP_LOG = {
     "今日運動", "找運動", "來一題", "今日調酒",
     "動漫語錄", "我好無聊", "川普語錄", "隨機梗圖", "諾里斯",
     "動漫圖", "激勵名言",
-    "今日日文單字", "今日漢字", "今日西文單字",
+    "今日日文單字", "今日日文", "學日文",
+    "今日漢字", "漢字練習",
+    "今日西文單字", "今日西文", "學西文",
     "金價", "今日金價", "天文冷知識", "科學冷知識", "數字冷知識",
+    "新聞", "今日新聞", "最新新聞",
+    "去背", "配對星座",
 }
 
 
@@ -83,7 +91,7 @@ def _should_log(text: str) -> bool:
         return False
     if text in _SKIP_LOG:
         return False
-    if re.match(r'^(叫我|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標)', text):
+    if re.match(r'^(叫我|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標|QR\s|縮網址\s|找影片\s|改寫\s|配對星座\s|查日文\s|查西文\s|漢字\s|食譜\s|熱量\s|消耗熱量\s|BMI\s|寶可夢\s|找書\s|國家\s)', text, re.IGNORECASE):
         return False
     return True
 
@@ -1276,6 +1284,191 @@ def fetch_pokemon_detail(name: str) -> str:
         return f"找不到寶可夢「{name}」，確認英文名或 ID 是否正確", None
 
 
+# ─── Social / Utility ─────────────────────────────────────
+
+def fetch_qr_code(url: str) -> tuple:
+    encoded = requests.utils.quote(url, safe="")
+    img_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded}"
+    return f"📱 QR Code 產生好了！", img_url
+
+
+def shorten_url(url: str) -> str:
+    try:
+        r = requests.get(
+            "https://tinyurl.com/api-create.php",
+            params={"url": url},
+            timeout=8,
+        )
+        short = r.text.strip()
+        if short.startswith("http"):
+            return f"🔗 縮短後：{short}"
+    except Exception:
+        pass
+    return "短網址產生失敗 😢"
+
+
+def fetch_youtube(query: str) -> str:
+    d = _rapid("get", "youtube-v31.p.rapidapi.com", "/search",
+               params={"q": query, "part": "snippet", "type": "video",
+                       "maxResults": "3", "regionCode": "TW"})
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if not d:
+        return f"🎬 找不到「{query}」相關影片"
+    try:
+        items = d.get("items", [])
+        if not items:
+            return f"🎬 找不到「{query}」相關影片"
+        lines = [f"🎬 找到以下影片：\n"]
+        for item in items[:3]:
+            snippet = item.get("snippet", {})
+            vid_id = item.get("id", {}).get("videoId", "")
+            title = snippet.get("title", "")
+            channel = snippet.get("channelTitle", "")
+            if vid_id:
+                lines.append(f"• {title}\n  {channel}\n  https://youtu.be/{vid_id}")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[youtube] {e}")
+        return f"🎬 找不到「{query}」相關影片"
+
+
+def rewrite_text(text: str) -> str:
+    result = call_gemini(
+        f"把以下文字改寫成三種風格，每種一行，加上標籤，用繁體中文：\n"
+        f"原文：{text}\n\n"
+        f"1. 🔥 嗆辣版：（改寫）\n"
+        f"2. 🥺 撒嬌版：（改寫）\n"
+        f"3. 🎩 正經版：（改寫）"
+    )
+    return result or "改寫失敗 😢"
+
+
+_ZODIAC_EN = {
+    "牡羊": "aries", "金牛": "taurus", "雙子": "gemini",
+    "巨蟹": "cancer", "獅子": "leo", "處女": "virgo",
+    "天秤": "libra", "天蠍": "scorpio", "射手": "sagittarius",
+    "摩羯": "capricorn", "水瓶": "aquarius", "雙魚": "pisces",
+}
+
+
+def match_zodiac(sign1: str, sign2: str) -> str:
+    s1 = sign1.replace("座", "")
+    s2 = sign2.replace("座", "")
+    e1 = _ZODIAC_EN.get(s1)
+    e2 = _ZODIAC_EN.get(s2)
+    if e1 and e2:
+        d = _rapid("get", "starmatch-ai.p.rapidapi.com", "/api/compatibility",
+                   params={"sign1": e1, "sign2": e2})
+        if d and d is not _QUOTA:
+            try:
+                score = d.get("compatibilityScore") or d.get("score", "")
+                desc = d.get("description") or d.get("summary", "")
+                if desc:
+                    desc_zh = call_gemini(f"翻成繁體中文，保持有趣，100字內：{desc}")
+                    return f"💕 {s1}座 × {s2}座\n\n配對指數：{score}\n\n{desc_zh}"
+            except Exception:
+                pass
+    return call_gemini(
+        f"分析{s1}座和{s2}座的配對，包含：配對指數（%）、優點、挑戰，"
+        f"輕鬆有趣，用繁體中文，150字以內"
+    ) or f"查不到{s1}座×{s2}座的配對資料"
+
+
+def fetch_news() -> str:
+    try:
+        r = requests.get(
+            "https://saurav.tech/NewsAPI/top-headlines/category/general/tw.json",
+            timeout=10,
+        )
+        articles = r.json().get("articles", [])[:5]
+        if articles:
+            lines = ["📰 今日新聞頭條：\n"]
+            for a in articles:
+                lines.append(f"• {a.get('title', '')}")
+            return "\n".join(lines)
+    except Exception:
+        pass
+    d = _rapid("get", "bing-news-search1.p.rapidapi.com", "/news/search",
+               params={"q": "台灣 新聞", "count": "5", "mkt": "zh-TW"})
+    if d is _QUOTA:
+        return _QUOTA_MSG
+    if d:
+        try:
+            items = d.get("value", [])[:5]
+            if items:
+                lines = ["📰 今日新聞頭條：\n"]
+                for item in items:
+                    lines.append(f"• {item.get('name', '')}")
+                return "\n".join(lines)
+        except Exception:
+            pass
+    return call_gemini("給我5則今天台灣的重要新聞頭條，每則一行，用繁體中文") or "新聞暫時無法取得"
+
+
+# ─── Shazam ───────────────────────────────────────────────
+
+def shazam_identify(audio_bytes: bytes) -> str:
+    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+    for host in ["shazam.p.rapidapi.com", "shazam-core.p.rapidapi.com"]:
+        path = "/songs/v2/detect" if "shazam.p.rapidapi.com" == host else "/v1/songs/detect"
+        d = _rapid("post", host, path,
+                   headers={"Content-Type": "text/plain"},
+                   data=audio_b64)
+        if d is _QUOTA:
+            continue
+        if not d:
+            continue
+        try:
+            track = (d.get("track") or
+                     d.get("matches", [{}])[0] if isinstance(d.get("matches"), list) else {})
+            if isinstance(d.get("track"), dict):
+                track = d["track"]
+            title = track.get("title", "") or track.get("name", "")
+            artist = track.get("subtitle", "") or track.get("artist", "")
+            if title:
+                return f"🎵 找到了！\n\n《{title}》\n{artist}"
+        except Exception as e:
+            print(f"[shazam] parse error: {e}")
+    return "🎵 聽不出來這首歌，音訊可能太短或品質不夠"
+
+
+# ─── Background Removal ───────────────────────────────────
+
+_REMOVE_BG_PENDING: set = set()
+
+def remove_background(img_bytes: bytes) -> str | None:
+    import io
+    d = _rapid("post", "background-remover3.p.rapidapi.com", "/v1.0/removebg/1.0.0",
+               files={"image": ("image.jpg", io.BytesIO(img_bytes), "image/jpeg")})
+    if d is _QUOTA or not d:
+        return None
+    try:
+        url = d.get("url") or d.get("result_url") or d.get("output_url")
+        return url
+    except Exception:
+        return None
+
+
+# ─── NSFW Detection ───────────────────────────────────────
+
+def check_nsfw(img_bytes: bytes) -> bool:
+    import io
+    d = _rapid("post", "nsfw-image-classification1.p.rapidapi.com", "/v1/results",
+               files={"image": ("img.jpg", io.BytesIO(img_bytes), "image/jpeg")})
+    if d is _QUOTA or not d:
+        return False
+    try:
+        results = d if isinstance(d, list) else d.get("results", [])
+        for item in results:
+            if item.get("className") in ("Sexy", "Porn", "Hentai"):
+                if float(item.get("probability", 0)) > 0.7:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def fetch_random_meal() -> str:
     try:
         r = requests.get("https://www.themealdb.com/api/json/v1/1/random.php", timeout=8)
@@ -1331,34 +1524,67 @@ _ZODIAC = {
 _ZODIAC_ZH = {v: k for k, v in _ZODIAC.items()}
 
 
+def _fetch_horoscope_aztro(sign_en: str) -> dict | None:
+    try:
+        r = requests.post(
+            f"https://aztro.p.rapidapi.com/?sign={sign_en}&day=today",
+            headers={"X-RapidAPI-Key": _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "",
+                     "X-RapidAPI-Host": "aztro.p.rapidapi.com"},
+            timeout=8,
+        )
+        if r.status_code == 429:
+            return None
+        return r.json()
+    except Exception:
+        return None
+
+
+def _fetch_horoscope_v2(sign_en: str) -> dict | None:
+    d = _rapid("get", "horoscope-astrology.p.rapidapi.com", "/today",
+               params={"sunsign": sign_en})
+    if d is _QUOTA or not d:
+        return None
+    return d
+
+
 def fetch_horoscope(text) -> str:
-    if not RAPIDAPI_KEY:
-        return "🔮 需要設定 RAPIDAPI_KEY（RapidAPI 免費申請）"
     sign_zh = next((k for k in _ZODIAC if k in text), None)
     if not sign_zh:
         signs = " / ".join(_ZODIAC.keys())
         return f"🔮 請說「今日天蠍」「今日牡羊」...\n支援：{signs}"
     sign_en = _ZODIAC[sign_zh]
-    try:
-        r = requests.post(
-            f"https://aztro.p.rapidapi.com/?sign={sign_en}&day=today",
-            headers={"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": "aztro.p.rapidapi.com"},
-            timeout=8,
-        )
-        d = r.json()
-        desc = d.get("description", "")
-        mood = d.get("mood", "")
-        color = d.get("color", "")
-        lucky = d.get("lucky_number", "")
-        compat = _ZODIAC_ZH.get(d.get("compatibility", "").lower(), d.get("compatibility", ""))
-        return (
-            f"🔮 今日{sign_zh}座運勢\n\n"
-            f"{desc}\n\n"
-            f"心情：{mood}　幸運色：{color}\n"
-            f"幸運數字：{lucky}　速配星座：{compat}座"
-        )
-    except Exception:
-        return "🔮 占星師在睡覺，待會再問 😴"
+
+    # 嘗試多個 API 輪班
+    data = _fetch_horoscope_aztro(sign_en) or _fetch_horoscope_v2(sign_en)
+
+    if data:
+        desc_en = data.get("description") or data.get("horoscope") or data.get("prediction", "")
+        mood = data.get("mood", "")
+        color = data.get("color", "")
+        lucky = data.get("lucky_number", "") or data.get("luckyNumber", "")
+        compat_raw = data.get("compatibility", "") or data.get("luckySign", "")
+        compat = _ZODIAC_ZH.get(str(compat_raw).lower(), compat_raw)
+        if desc_en:
+            desc = call_gemini(f"翻成繁體中文，2-3句，保持有趣：{desc_en}")
+            lines = [f"🔮 今日{sign_zh}座運勢\n\n{desc}"]
+            extra = []
+            if mood:
+                extra.append(f"心情：{mood}")
+            if color:
+                extra.append(f"幸運色：{color}")
+            if lucky:
+                extra.append(f"幸運數字：{lucky}")
+            if compat:
+                extra.append(f"速配：{compat}座")
+            if extra:
+                lines.append("　".join(extra))
+            return "\n\n".join(lines)
+
+    # Gemini fallback
+    return call_gemini(
+        f"用輕鬆有趣的風格給{sign_zh}座今日運勢，包含：整體運勢、心情、幸運色、幸運數字，"
+        f"繁體中文，150字以內"
+    ) or "🔮 占星師在睡覺，待會再問 😴"
 
 
 def _parse_reminder_date(s: str) -> str | None:
@@ -1750,6 +1976,7 @@ def handle_message(event):
                 "今日運勢 / 今日天蠍（任意星座）\n"
                 "誰請客 / 抽籤 A / B\n"
                 "配對 A B / 搖骰子 / 猜拳 剪刀\n"
+                "配對星座 天蠍 金牛\n"
                 "貓貓 / 狗狗 / 狐狸 / 柴柴\n"
                 "熊貓 / 無尾熊 / 浣熊\n"
                 "今日宇宙 / 抽寶可夢\n"
@@ -1758,6 +1985,7 @@ def handle_message(event):
                 "動漫圖 / 激勵名言\n"
                 "\n🎵 媒體 & 娛樂\n"
                 "找歌 [歌名]\n"
+                "找影片 [關鍵字]（YouTube）\n"
                 "查電影 [片名]\n"
                 "電影台詞\n"
                 "在哪看 [片名]\n"
@@ -1765,6 +1993,7 @@ def handle_message(event):
                 "川普語錄\n"
                 "隨機梗圖\n"
                 "諾里斯\n"
+                "新聞（今日頭條）\n"
                 "\n💪 生活\n"
                 "今日運動 / 找運動 [部位]\n"
                 "今日調酒 / 今日調酒 馬丁尼\n"
@@ -1788,13 +2017,21 @@ def handle_message(event):
                 "\n🔧 實用\n"
                 "匯率 / 天氣 [城市]\n"
                 "倒數 6/15\n"
+                "QR [網址或文字]\n"
+                "縮網址 [URL]\n"
+                "改寫 [文字]（嗆辣/撒嬌/正經三版）\n"
+                "去背（傳圖後自動去背）\n"
+                "傳音訊 → 自動辨識歌曲（Shazam）\n"
+                "\n🇯🇵 日文學習\n"
                 "XXX日文怎麼說\n"
                 "查日文 [單字]\n"
                 "今日日文單字\n"
                 "漢字 [字]\n"
                 "今日漢字\n"
+                "\n🇪🇸 西文學習\n"
                 "查西文 [單字]\n"
                 "今日西文單字\n"
+                "\n⚙️ 設定\n"
                 "叫我 [暱稱]\n"
                 "@小棉襖 問任何問題"
             )
@@ -1971,18 +2208,33 @@ def handle_message(event):
 
         # ── 來一題（互動問答，有狀態）──
         elif text == "來一題":
+            question, answer, cat = "", "", ""
+            # API Ninjas
             d = _ninja("/v1/trivia")
-            if d is _QUOTA:
-                reply_text = _QUOTA_MSG
-            elif d and isinstance(d, list):
-                q = d[0]
-                question = q.get("question", "")
-                answer = q.get("answer", "")
+            if d and d is not _QUOTA and isinstance(d, list):
+                question = d[0].get("question", "")
+                answer = d[0].get("answer", "")
+                cat = d[0].get("category", "")
+            # opentdb fallback
+            if not question:
+                try:
+                    import html as _html
+                    r2 = requests.get("https://opentdb.com/api.php",
+                                      params={"amount": 1, "type": "multiple"}, timeout=8)
+                    res = r2.json().get("results", [])
+                    if res:
+                        question = _html.unescape(res[0].get("question", ""))
+                        answer = _html.unescape(res[0].get("correct_answer", ""))
+                        cat = res[0].get("category", "")
+                except Exception:
+                    pass
+            if question:
+                q_zh = call_gemini(f"翻成繁體中文，只給翻譯：{question}")
+                a_zh = call_gemini(f"翻成繁體中文，只給翻譯：{answer}")
                 gid = group_id or "default"
-                _QUIZ_STATE[gid] = {"question": question, "answer": answer}
-                cat = q.get("category", "")
+                _QUIZ_STATE[gid] = {"question": q_zh or question, "answer": a_zh or answer}
                 reply_text = (
-                    f"🧠 來答題！（{cat}）\n\n{question}\n\n"
+                    f"🧠 來答題！（{cat}）\n\n{q_zh or question}\n\n"
                     f"傳「答 你的答案」作答，傳「答案」看解答"
                 )
             else:
@@ -2148,6 +2400,74 @@ def handle_message(event):
         elif m := re.match(r'^食譜\s+(.+)$', text):
             reply_text = fetch_recipe_by_ingredient(m.group(1).strip())
 
+        # ── QR Code ──
+        elif m := re.match(r'^QR\s+(.+)$', text, re.IGNORECASE):
+            url_or_text = m.group(1).strip()
+            qr_text, qr_img = fetch_qr_code(url_or_text)
+            reply_text = qr_text
+            reply_image_url = qr_img
+
+        # ── 縮網址 ──
+        elif m := re.match(r'^縮網址\s+(.+)$', text):
+            reply_text = shorten_url(m.group(1).strip())
+
+        # ── YouTube 搜尋 ──
+        elif m := re.match(r'^找影片\s+(.+)$', text):
+            reply_text = fetch_youtube(m.group(1).strip())
+
+        # ── 改寫文案 ──
+        elif m := re.match(r'^改寫\s+(.+)$', text, re.DOTALL):
+            reply_text = rewrite_text(m.group(1).strip())
+
+        # ── 星座配對 ──
+        elif m := re.match(r'^配對星座\s+(\S+)\s+(\S+)$', text):
+            reply_text = match_zodiac(m.group(1).strip(), m.group(2).strip())
+
+        elif text == "配對星座":
+            reply_text = "請傳「配對星座 星座1 星座2」\n例：配對星座 天蠍 金牛"
+
+        # ── 新聞 ──
+        elif text in ("新聞", "今日新聞", "最新新聞"):
+            reply_text = fetch_news()
+
+        # ── 去背（等待圖片） ──
+        elif text == "去背":
+            if user_id:
+                _REMOVE_BG_PENDING.add(user_id)
+                reply_text = "請傳一張圖片，我幫你去背 🖼️"
+
+        # ── 日文查詢 ──
+        elif m := re.match(r'^查日文\s+(.+)$', text):
+            reply_text = fetch_jisho(m.group(1).strip())
+
+        elif m := re.match(r'^(.+)日文怎麼說$', text):
+            reply_text = fetch_jisho(m.group(1).strip())
+
+        elif text in ("今日日文單字", "今日日文", "學日文"):
+            reply_text = fetch_daily_japanese()
+
+        # ── 漢字查詢 ──
+        elif m := re.match(r'^漢字\s+(\S)$', text):
+            char = m.group(1).strip()
+            d = _kanji_lookup(char)
+            if d:
+                on = "、".join(d["on"]) or "—"
+                kun = "、".join(d["kun"]) or "—"
+                meanings = "、".join(d["meanings"]) or "—"
+                reply_text = f"🈶 漢字：{d['kanji']}\n音讀：{on}　訓讀：{kun}\n意思：{meanings}　筆畫：{d['strokes']}"
+            else:
+                reply_text = call_gemini(f"用繁體中文介紹日文漢字「{char}」，包含讀音、意思和例句") or f"找不到「{char}」的資料"
+
+        elif text in ("今日漢字", "漢字練習"):
+            reply_text = fetch_daily_kanji()
+
+        # ── 西文查詢 ──
+        elif m := re.match(r'^查西文\s+(.+)$', text):
+            reply_text = fetch_spanish(m.group(1).strip())
+
+        elif text in ("今日西文單字", "今日西文", "學西文"):
+            reply_text = fetch_daily_spanish()
+
         # ── 待翻譯輸入 ──
         elif user_id and user_id in _TRANSLATE_PENDING:
             if text in ("取消", "算了", "不翻了"):
@@ -2178,6 +2498,73 @@ def handle_message(event):
         line_bot_api.reply_message(
             ReplyMessageRequest(reply_token=reply_token, messages=messages)
         )
+
+
+@handler.add(MessageEvent, message=AudioMessageContent)
+def handle_audio(event):
+    """Shazam: identify song from audio message."""
+    reply_token = event.reply_token
+    with ApiClient(configuration) as api_client:
+        try:
+            blob_api = MessagingApiBlob(api_client)
+            audio_bytes = blob_api.get_message_content(event.message.id)
+        except Exception:
+            return
+        result = shazam_identify(audio_bytes)
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(reply_token=reply_token,
+                                messages=[TextMessage(text=result)])
+        )
+
+
+@handler.add(MessageEvent, message=ImageMessageContent)
+def handle_image(event):
+    """NSFW detection + background removal for image messages."""
+    reply_token = event.reply_token
+    user_id = event.source.user_id if hasattr(event.source, "user_id") else None
+
+    with ApiClient(configuration) as api_client:
+        try:
+            blob_api = MessagingApiBlob(api_client)
+            img_bytes = blob_api.get_message_content(event.message.id)
+        except Exception:
+            return
+
+        line_api = MessagingApi(api_client)
+
+        # ── 去背 pending flow ──
+        if user_id and user_id in _REMOVE_BG_PENDING:
+            _REMOVE_BG_PENDING.discard(user_id)
+            result_url = remove_background(img_bytes)
+            if result_url:
+                line_api.reply_message(ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[
+                        TextMessage(text="✅ 去背完成！"),
+                        ImageMessage(
+                            original_content_url=result_url,
+                            preview_image_url=result_url,
+                        ),
+                    ],
+                ))
+            else:
+                line_api.reply_message(ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text="去背失敗，請稍後再試 😢")],
+                ))
+            return
+
+        # ── NSFW 自動偵測 ──
+        try:
+            is_nsfw = check_nsfw(img_bytes)
+        except Exception:
+            is_nsfw = False
+
+        if is_nsfw:
+            line_api.reply_message(ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text="⚠️ 偵測到不雅圖片，小棉襖不允許這種內容喔！")],
+            ))
 
 
 @handler.add(MemberJoinedEvent)
