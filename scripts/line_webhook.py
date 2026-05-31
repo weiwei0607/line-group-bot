@@ -110,6 +110,77 @@ def call_gemini(prompt):
         return None
 
 
+# ─── 智慧翻譯：RapidAPI 為主，Gemini 為 fallback ───────────
+
+def smart_translate(text: str, target: str = "zh-TW") -> str:
+    """先嘗試 RapidAPI 翻譯，失敗再用 Gemini"""
+    if not text or not text.strip():
+        return text
+    # 已經是中文直接回傳
+    if any(ord(c) > 127 for c in text[:30]):
+        return text
+    # 1. 嘗試 OpenL Translate
+    try:
+        tl = target.split("-")[0] if "-" in target else target
+        r = requests.post(
+            "https://openl-translate.p.rapidapi.com/translate/bulk",
+            headers={"Content-Type": "application/json", "x-rapidapi-host": "openl-translate.p.rapidapi.com", "x-rapidapi-key": (_RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "")},
+            json={"target_lang": tl, "text": [text]},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            d = r.json()
+            if isinstance(d, list) and len(d) > 0 and d[0]:
+                return d[0]
+            if isinstance(d, dict):
+                for k in ("translations", "translated_texts", "text", "result"):
+                    v = d.get(k)
+                    if v and isinstance(v, list) and len(v) > 0:
+                        return v[0]
+    except Exception:
+        pass
+    # 2. 嘗試 Just Translated
+    try:
+        tl = target.split("-")[0] if "-" in target else target
+        r = requests.get(
+            "https://just-translated.p.rapidapi.com/",
+            headers={"x-rapidapi-host": "just-translated.p.rapidapi.com", "x-rapidapi-key": (_RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "")},
+            params={"lang": tl, "text": text},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            d = r.json()
+            if isinstance(d, dict):
+                for k in ("translatedText", "translation", "text", "result", "translated"):
+                    v = d.get(k)
+                    if v and isinstance(v, str):
+                        return v
+            if isinstance(d, str):
+                return d
+    except Exception:
+        pass
+    # 3. 嘗試 Microsoft Translator
+    try:
+        r = requests.post(
+            "https://microsoft-translator-text.p.rapidapi.com/translate",
+            headers={"Content-Type": "application/json", "x-rapidapi-host": "microsoft-translator-text.p.rapidapi.com", "x-rapidapi-key": (_RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "")},
+            params={"api-version": "3.0", "to": target},
+            json=[{"Text": text}],
+            timeout=8,
+        )
+        if r.status_code == 200:
+            d = r.json()
+            if isinstance(d, list) and len(d) > 0:
+                t = d[0].get("translations", [])
+                if t and len(t) > 0:
+                    return t[0].get("text", "")
+    except Exception:
+        pass
+    # 4. Fallback 到 Gemini
+    result = call_gemini(f"翻成繁體中文，只給翻譯結果：{text}")
+    return result or text
+
+
 # ─── LINE helpers ─────────────────────────────────────────
 
 def get_display_name(api_client, group_id, user_id):
@@ -963,7 +1034,7 @@ def fetch_number_fact() -> str:
         r = requests.get("http://numbersapi.com/random/trivia", params={"json": "true"}, timeout=8)
         text = r.json().get("text", "")
         if text:
-            zh = call_gemini(f"翻成繁體中文，保持趣味，只給翻譯：{text}")
+            zh = smart_translate(text)
             return f"🔢 {zh}"
     except Exception:
         pass
@@ -977,7 +1048,7 @@ def fetch_astronomy_fact() -> str:
     if d and isinstance(d, list):
         fact = d[0].get("fact", "")
         if fact:
-            zh = call_gemini(f"翻成繁體中文，保持趣味，只給翻譯：{fact}")
+            zh = smart_translate(fact)
             return f"🔭 {zh}"
     return call_gemini("給我一個有趣的天文或科學冷知識，用繁體中文") or "天文冷知識暫時失靈"
 
@@ -1365,7 +1436,7 @@ def match_zodiac(sign1: str, sign2: str) -> str:
                 score = d.get("compatibilityScore") or d.get("score", "")
                 desc = d.get("description") or d.get("summary", "")
                 if desc:
-                    desc_zh = call_gemini(f"翻成繁體中文，保持有趣，100字內：{desc}")
+                    desc_zh = smart_translate(desc)
                     return f"💕 {s1}座 × {s2}座\n\n配對指數：{score}\n\n{desc_zh}"
             except Exception:
                 pass
@@ -1565,7 +1636,7 @@ def fetch_horoscope(text) -> str:
         compat_raw = data.get("compatibility", "") or data.get("luckySign", "")
         compat = _ZODIAC_ZH.get(str(compat_raw).lower(), compat_raw)
         if desc_en:
-            desc = call_gemini(f"翻成繁體中文，2-3句，保持有趣：{desc_en}")
+            desc = smart_translate(desc_en)
             lines = [f"🔮 今日{sign_zh}座運勢\n\n{desc}"]
             extra = []
             if mood:
@@ -2229,8 +2300,8 @@ def handle_message(event):
                 except Exception:
                     pass
             if question:
-                q_zh = call_gemini(f"翻成繁體中文，只給翻譯：{question}")
-                a_zh = call_gemini(f"翻成繁體中文，只給翻譯：{answer}")
+                q_zh = smart_translate(question)
+                a_zh = smart_translate(answer)
                 gid = group_id or "default"
                 _QUIZ_STATE[gid] = {"question": q_zh or question, "answer": a_zh or answer}
                 reply_text = (
