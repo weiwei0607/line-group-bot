@@ -32,6 +32,8 @@ CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
+NASA_API_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY")
+NINJA_API_KEY = os.environ.get("NINJA_API_KEY", "")
 BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
 BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 MEMBERS = ["太后", "毛毛", "二毛"]
@@ -56,6 +58,7 @@ _SKIP_LOG = {
     "找歌", "查電影", "電影台詞", "在哪看",
     "今日運動", "找運動", "來一題", "今日調酒",
     "動漫語錄", "我好無聊", "川普語錄", "隨機梗圖", "諾里斯",
+    "動漫圖", "激勵名言",
 }
 
 
@@ -331,7 +334,7 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
     try:
         r = requests.get(
             "https://api.nasa.gov/planetary/apod",
-            params={"api_key": "DEMO_KEY"},
+            params={"api_key": NASA_API_KEY},
             timeout=10,
         )
         d = r.json()
@@ -347,6 +350,10 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
 
 # ─── RapidAPI 共用 helper ─────────────────────────────────
 
+_QUOTA = object()  # sentinel: API quota exceeded
+_QUOTA_MSG = "😅 今天 API 額度用完囉，明天再來試試！"
+
+
 def _rapid(method: str, host: str, path: str, **kwargs):
     if not RAPIDAPI_KEY:
         return None
@@ -356,11 +363,34 @@ def _rapid(method: str, host: str, path: str, **kwargs):
         r = getattr(requests, method)(
             f"https://{host}{path}", headers=headers, timeout=10, **kwargs
         )
+        if r.status_code == 429:
+            print(f"[RapidAPI] 429 quota exceeded: {host}{path}")
+            return _QUOTA
         r.raise_for_status()
         return r.json()
     except Exception as e:
         print(f"[RapidAPI] {host}{path} → {e}")
         return None
+
+
+def _ninja(path: str, **kwargs):
+    """Call api-ninjas.com directly with NINJA_API_KEY, fall back to RapidAPI."""
+    if NINJA_API_KEY:
+        try:
+            r = requests.get(
+                f"https://api.api-ninjas.com{path}",
+                headers={"X-Api-Key": NINJA_API_KEY},
+                timeout=10,
+                **kwargs,
+            )
+            if r.status_code == 429:
+                print(f"[api-ninjas] 429 quota exceeded: {path}")
+                return _QUOTA
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            print(f"[api-ninjas] {path} → {e}")
+    return _rapid("get", "api-ninjas.p.rapidapi.com", path, **kwargs)
 
 
 # ─── Translation ──────────────────────────────────────────
@@ -392,6 +422,8 @@ def translate_text(text: str, target_lang: str) -> str:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={"source_language": "auto", "target_language": target_lang, "text": text},
     )
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return "翻譯失敗，等一下再試 😢"
     translated = (d.get("data") or {}).get("translatedText", "")
@@ -429,8 +461,8 @@ def get_weather_v2(text: str) -> str:
             break
     d = _rapid("get", "weatherapi-com.p.rapidapi.com", "/current.json",
                params={"q": city, "lang": "zh"})
-    if not d:
-        return get_weather(text)
+    if d is _QUOTA or not d:
+        return get_weather(text)  # fall back to free wttr.in
     try:
         loc = d["location"]["name"]
         cur = d["current"]
@@ -449,6 +481,8 @@ def get_weather_v2(text: str) -> str:
 def fetch_spotify_track(query: str) -> str:
     d = _rapid("get", "spotify23.p.rapidapi.com", "/search",
                params={"q": query, "type": "tracks", "numberOfTopResults": "3"})
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return f"🎵 找不到「{query}」😢"
     try:
@@ -472,6 +506,8 @@ def fetch_spotify_track(query: str) -> str:
 
 def fetch_imdb(title: str) -> str:
     d = _rapid("get", "imdb8.p.rapidapi.com", "/title/find", params={"q": title})
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return f"🎬 查不到「{title}」😢"
     try:
@@ -493,6 +529,8 @@ def fetch_imdb(title: str) -> str:
 
 def fetch_movie_quote() -> str:
     d = _rapid("get", "movie-quote.p.rapidapi.com", "/", params={"count": "1"})
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return "🎬 沒有台詞，待會再試"
     try:
@@ -507,11 +545,14 @@ def fetch_movie_quote() -> str:
 
 
 def fetch_streaming(title: str) -> str:
+    d = None
     for country in ["tw", "us"]:
         d = _rapid("get", "streaming-availability.p.rapidapi.com", "/shows/search/title",
                    params={"title": title, "country": country})
-        if d:
+        if d and d is not _QUOTA:
             break
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return f"🍿 找不到「{title}」的串流資訊"
     try:
@@ -549,6 +590,8 @@ def fetch_exercise(body_part: str = None) -> str:
     else:
         data = _rapid("get", "exercisedb.p.rapidapi.com", "/exercises",
                       params={"limit": "20", "offset": str(random.randint(0, 800))})
+    if data is _QUOTA:
+        return _QUOTA_MSG
     if not data or not isinstance(data, list):
         return "💪 找不到運動，待會再試"
     ex = random.choice(data)
@@ -566,7 +609,9 @@ def fetch_exercise(body_part: str = None) -> str:
 # ─── Trivia ──────────────────────────────────────────────
 
 def fetch_trivia() -> str:
-    d = _rapid("get", "api-ninjas.p.rapidapi.com", "/v1/trivia")
+    d = _ninja("/v1/trivia")
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d or not isinstance(d, list):
         return "🧠 題庫暫時關閉，待會再試"
     q = d[0]
@@ -581,7 +626,9 @@ def fetch_trivia() -> str:
 
 def fetch_cocktail(name: str = None) -> str:
     params = {"name": name} if name else {}
-    d = _rapid("get", "api-ninjas.p.rapidapi.com", "/v1/cocktail", params=params)
+    d = _ninja("/v1/cocktail", params=params)
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if d and isinstance(d, list):
         c = d[0]
         return (
@@ -607,6 +654,8 @@ def fetch_cocktail(name: str = None) -> str:
 
 def fetch_anime_quote() -> str:
     d = _rapid("get", "anime-quotes4.p.rapidapi.com", "/")
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return "🌸 動漫語錄暫時失靈，待會再試"
     try:
@@ -642,7 +691,9 @@ _FALLBACK_ACTIVITIES = [
 
 def fetch_random_activity() -> str:
     d = _rapid("get", "bored-api.p.rapidapi.com", "/api/activity")
-    if d and d.get("activity"):
+    if d is _QUOTA or not d or not isinstance(d, dict):
+        return f"🎲 無聊的話可以：\n{random.choice(_FALLBACK_ACTIVITIES)}"
+    if d.get("activity"):
         return (
             f"🎲 無聊的話可以：\n{d['activity']}\n"
             f"類型：{d.get('type', '')}　人數：{d.get('participants', 1)}"
@@ -668,6 +719,8 @@ def fetch_trump_quote() -> str:
 
 def fetch_superhero(name: str) -> str:
     d = _rapid("get", "superhero-search.p.rapidapi.com", f"/api/{name}")
+    if d is _QUOTA:
+        return _QUOTA_MSG
     if not d:
         return f"🦸 找不到「{name}」，試試英文名字"
     try:
@@ -691,6 +744,8 @@ def fetch_superhero(name: str) -> str:
 
 def fetch_meme() -> tuple:
     d = _rapid("get", "memeados.p.rapidapi.com", "/rdmeme/")
+    if d is _QUOTA:
+        return _QUOTA_MSG, None
     if d:
         try:
             url = d.get("url") or d.get("image", "")
@@ -723,7 +778,7 @@ def fetch_tldr(text: str) -> str:
         headers={"Content-Type": "application/json"},
         json={"article_html": text, "max_sentences": 3},
     )
-    if d:
+    if d is not _QUOTA and d:
         sentences = d.get("summary", [])
         if sentences:
             return "📝 摘要：\n" + " ".join(sentences)
@@ -781,6 +836,113 @@ def handle_rps(text) -> str:
     else:
         result = random.choice(["哈我贏了 😈", "幸運是我的 🎊", "再猜！！"])
     return f"{user_emoji} VS {bot_emoji}\n{result}"
+
+
+# ─── Free APIs (no key) ───────────────────────────────────
+
+def fetch_country(name: str) -> str:
+    try:
+        r = requests.get(
+            f"https://restcountries.com/v3.1/name/{requests.utils.quote(name)}",
+            params={"fields": "name,capital,population,languages,currencies,flags,region"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        c = r.json()[0]
+        cap = (c.get("capital") or ["—"])[0]
+        pop = f"{c.get('population', 0):,}"
+        langs = "、".join(list((c.get("languages") or {}).values())[:3])
+        currs = "、".join(
+            f"{v.get('name', k)}（{v.get('symbol', '')}）"
+            for k, v in (c.get("currencies") or {}).items()
+        )
+        region = c.get("region", "")
+        common = c["name"]["common"]
+        return (
+            f"🌍 {common}（{region}）\n"
+            f"首都：{cap}\n"
+            f"人口：{pop}\n"
+            f"語言：{langs or '—'}\n"
+            f"貨幣：{currs or '—'}"
+        )
+    except Exception:
+        return f"😢 找不到「{name}」的資料"
+
+
+def fetch_book(query: str) -> str:
+    try:
+        r = requests.get(
+            "https://openlibrary.org/search.json",
+            params={"q": query, "limit": 3, "fields": "title,author_name,first_publish_year,subject"},
+            timeout=10,
+        )
+        docs = r.json().get("docs", [])
+        if not docs:
+            return f"📚 找不到「{query}」相關書籍"
+        lines = [f"📚 找到 {len(docs)} 本相關書籍：\n"]
+        for d in docs:
+            title = d.get("title", "—")
+            authors = "、".join((d.get("author_name") or [])[:2]) or "—"
+            year = d.get("first_publish_year", "")
+            year_str = f"（{year}）" if year else ""
+            lines.append(f"• {title}{year_str}\n  作者：{authors}")
+        return "\n".join(lines)
+    except Exception:
+        return "📚 書籍查詢暫時失敗"
+
+
+def fetch_waifu() -> tuple:
+    try:
+        r = requests.get("https://api.waifu.im/search", params={"is_nsfw": "false"}, timeout=10)
+        items = r.json().get("images", [])
+        if items:
+            return "🌸 動漫圖來了！", items[0].get("url")
+    except Exception:
+        pass
+    return "🌸 動漫圖暫時抓不到", None
+
+
+def fetch_quotable() -> str:
+    try:
+        r = requests.get("https://api.quotable.io/random", timeout=8)
+        d = r.json()
+        q = d.get("content", "")
+        a = d.get("author", "")
+        if q:
+            return f'✨ "{q}"\n\n— {a}'
+    except Exception:
+        pass
+    return ""
+
+
+def fetch_pokemon_detail(name: str) -> str:
+    try:
+        r = requests.get(
+            f"https://pokeapi.co/api/v2/pokemon/{name.lower()}",
+            timeout=10,
+        )
+        r.raise_for_status()
+        d = r.json()
+        pname = d["name"].capitalize()
+        types = "、".join(t["type"]["name"].capitalize() for t in d["types"])
+        height = d["height"] / 10
+        weight = d["weight"] / 10
+        abilities = "、".join(a["ability"]["name"].replace("-", " ").title() for a in d["abilities"][:3])
+        sprite = d["sprites"]["front_default"]
+        stats = {s["stat"]["name"]: s["base_stat"] for s in d["stats"]}
+        hp = stats.get("hp", "?")
+        atk = stats.get("attack", "?")
+        spd = stats.get("speed", "?")
+        return (
+            f"🎮 #{d['id']} {pname}\n"
+            f"屬性：{types}\n"
+            f"身高：{height}m  體重：{weight}kg\n"
+            f"特性：{abilities}\n"
+            f"HP:{hp} 攻擊:{atk} 速度:{spd}",
+            sprite,
+        )
+    except Exception:
+        return f"找不到寶可夢「{name}」，確認英文名或 ID 是否正確", None
 
 
 def fetch_random_meal() -> str:
@@ -1262,6 +1424,7 @@ def handle_message(event):
                 "今日宇宙 / 抽寶可夢\n"
                 "今日食譜 / 推薦電影\n"
                 "冷笑話 / 冷知識 / 給我建議\n"
+                "動漫圖 / 激勵名言\n"
                 "\n🎵 媒體 & 娛樂\n"
                 "找歌 [歌名]\n"
                 "查電影 [片名]\n"
@@ -1276,6 +1439,10 @@ def handle_message(event):
                 "今日調酒 / 今日調酒 馬丁尼\n"
                 "來一題（隨機問答）\n"
                 "我好無聊\n"
+                "\n📖 查詢\n"
+                "國家 [名稱]\n"
+                "找書 [書名]\n"
+                "寶可夢 [英文名/ID]\n"
                 "\n🌐 翻譯\n"
                 "翻 日文 [文字]\n"
                 "翻 英文 [文字]\n"
@@ -1498,6 +1665,31 @@ def handle_message(event):
         # ── 摘要 ──
         elif m := re.match(r'^摘要\s*(.+)$', text, re.DOTALL):
             reply_text = fetch_tldr(m.group(1).strip())
+
+        # ── 國家資訊 ──
+        elif m := re.match(r'^國家\s*(.+)$', text):
+            reply_text = fetch_country(m.group(1).strip())
+
+        # ── 找書 ──
+        elif m := re.match(r'^找書\s*(.+)$', text):
+            reply_text = fetch_book(m.group(1).strip())
+
+        # ── 動漫圖 ──
+        elif text == "動漫圖":
+            reply_text, reply_image_url = fetch_waifu()
+
+        # ── 激勵名言 ──
+        elif text in ("激勵名言", "今日名言"):
+            q = fetch_quotable()
+            reply_text = q if q else "✨ 今天也要加油！"
+
+        # ── 寶可夢詳細 ──
+        elif m := re.match(r'^寶可夢\s*(.+)$', text):
+            result = fetch_pokemon_detail(m.group(1).strip())
+            if isinstance(result, tuple):
+                reply_text, reply_image_url = result
+            else:
+                reply_text = result
 
         # ── 日文問題 ──
         elif (jp := handle_japanese_question(text)):
