@@ -8,7 +8,7 @@ from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration, ApiClient, MessagingApi,
-    ReplyMessageRequest, TextMessage
+    ReplyMessageRequest, TextMessage, ImageMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, MemberJoinedEvent
 
@@ -40,6 +40,8 @@ _SKIP_LOG = {
     "今日運勢", "運勢", "占卜",
     "誰請客", "今天誰請", "誰買單", "今天誰買",
     "冷笑話", "冷知識", "上週期", "總結",
+    "來隻貓", "貓貓", "來貓", "來隻狗", "狗狗", "來狗",
+    "抽寶可夢", "今日寶可夢", "給我建議", "今日忠告",
 }
 
 
@@ -225,6 +227,118 @@ def handle_fun_fact(_):
     return call_gemini(
         "請分享一個有趣的冷知識，讓人覺得「認真嗎！？」，繁體中文，不超過 3 句，開頭加 🤯"
     ) or "🤯 我腦袋當機了，明天再說"
+
+
+# ─── Easter eggs ─────────────────────────────────────────
+
+
+def fetch_cat_image() -> str | None:
+    try:
+        r = requests.get("https://api.thecatapi.com/v1/images/search", timeout=8)
+        return r.json()[0]["url"]
+    except Exception:
+        return None
+
+
+def fetch_dog_image() -> str | None:
+    try:
+        r = requests.get("https://dog.ceo/api/breeds/image/random", timeout=8)
+        url = r.json().get("message", "")
+        return url if url.startswith("https") else None
+    except Exception:
+        return None
+
+
+_POKEMON_TYPES = {
+    "normal": "一般", "fire": "火", "water": "水", "electric": "電",
+    "grass": "草", "ice": "冰", "fighting": "格鬥", "poison": "毒",
+    "ground": "地面", "flying": "飛行", "psychic": "超能力", "bug": "蟲",
+    "rock": "岩石", "ghost": "幽靈", "dragon": "龍", "dark": "惡",
+    "steel": "鋼", "fairy": "妖精",
+}
+
+
+def fetch_random_pokemon() -> str:
+    try:
+        pid = random.randint(1, 898)
+        p = requests.get(f"https://pokeapi.co/api/v2/pokemon/{pid}", timeout=8).json()
+        s = requests.get(f"https://pokeapi.co/api/v2/pokemon-species/{pid}", timeout=8).json()
+        zh_name = next((n["name"] for n in s["names"] if n["language"]["name"] == "zh-Hant"), p["name"].capitalize())
+        types = "／".join(_POKEMON_TYPES.get(t["type"]["name"], t["type"]["name"]) for t in p["types"])
+        height, weight = p["height"] / 10, p["weight"] / 10
+        flavor = next(
+            (f["flavor_text"].replace("\n", "").replace("\f", "")
+             for f in s["flavor_text_entries"] if f["language"]["name"] == "zh-Hant"),
+            "",
+        )
+        lines = [f"🎮 今日寶可夢：#{pid} {zh_name}", f"屬性：{types}　身高 {height}m　體重 {weight}kg"]
+        if flavor:
+            lines.append(f"📖 {flavor[:70]}")
+        return "\n".join(lines)
+    except Exception:
+        return "🎮 寶可夢跑掉了，再抽一次吧！"
+
+
+def fetch_advice() -> str:
+    try:
+        r = requests.get("https://api.adviceslip.com/advice", timeout=8)
+        advice = r.json()["slip"]["advice"]
+        return f"💡 今日忠告（英）\n{advice}"
+    except Exception:
+        return "💡 建議你今天多喝水 🫗"
+
+
+def handle_pairing(text) -> str:
+    m = re.match(r'^配對\s+(.+)', text)
+    if m:
+        parts = [p.strip() for p in re.split(r'[\s和與跟＆&×x]+', m.group(1)) if p.strip()]
+        a = parts[0] if len(parts) >= 1 else random.choice(MEMBERS)
+        b = parts[1] if len(parts) >= 2 else random.choice([x for x in MEMBERS if x != a] or MEMBERS)
+    else:
+        a, b = random.sample(MEMBERS, 2)
+    score = random.randint(0, 100)
+    if score >= 90:
+        label = "天生一對！！宇宙安排的 💑"
+    elif score >= 75:
+        label = "超配的！好感度爆表 🥰"
+    elif score >= 60:
+        label = "有點曖昧... 要不要試試看 👀"
+    elif score >= 40:
+        label = "普通朋友，但誰說普通不好 😊"
+    elif score >= 20:
+        label = "還需要多培養感情 😅"
+    else:
+        label = "宇宙說：緣分不夠，但可以努力 😂"
+    bar = "❤️" * (score // 10) + "🤍" * (10 - score // 10)
+    return f"💘 配對係數\n{a} × {b}\n{bar}\n{score}%　{label}"
+
+
+def handle_dice(text) -> str:
+    m = re.search(r'搖?(\d+)\s*[顆個]', text)
+    n = min(int(m.group(1)), 10) if m else 1
+    results = [random.randint(1, 6) for _ in range(n)]
+    faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"]
+    if n == 1:
+        return f"🎲 擲出了：{faces[results[0]-1]}（{results[0]} 點）"
+    return f"🎲 擲出 {n} 顆：\n{'  '.join(faces[r-1] for r in results)}\n合計：{sum(results)} 點"
+
+
+def handle_rps(text) -> str:
+    user_map = {"剪刀": "✂️", "石頭": "🪨", "布": "📄"}
+    user_choice = next((k for k in user_map if k in text), None)
+    bot_choice = random.choice(list(user_map))
+    bot_emoji = user_map[bot_choice]
+    if user_choice is None:
+        return f"猜拳要說：猜拳 剪刀 / 石頭 / 布\n（我出了{bot_emoji}，你出什麼？）"
+    user_emoji = user_map[user_choice]
+    wins = {"剪刀": "布", "石頭": "剪刀", "布": "石頭"}
+    if user_choice == bot_choice:
+        result = "平手！再來！"
+    elif wins[user_choice] == bot_choice:
+        result = random.choice(["你贏了！！", "輸了！不服氣！ 😤", "嗚嗚認輸"])
+    else:
+        result = random.choice(["哈我贏了 😈", "幸運是我的 🎊", "再猜！！"])
+    return f"{user_emoji} VS {bot_emoji}\n{result}"
 
 
 def handle_leave(_):
@@ -511,6 +625,7 @@ def handle_message(event):
     threading.Thread(target=update_last_activity, daemon=True).start()
 
     reply_text = None
+    reply_image_url = None
 
     with ApiClient(configuration) as api_client:
         member_label = get_member_label(api_client, group_id, user_id)
@@ -586,6 +701,29 @@ def handle_message(event):
         elif re.search(r'^(抽籤|幫我選|幫我決定|選一個)', text):
             reply_text = handle_draw_lots(text)
 
+        elif re.search(r'來隻貓|貓貓|來貓', text):
+            reply_image_url = fetch_cat_image()
+            reply_text = random.choice(["🐱 貓貓來了！", "喵～ 🐾", "🐱 今日貓貓！"])
+
+        elif re.search(r'來隻狗|狗狗|來狗', text):
+            reply_image_url = fetch_dog_image()
+            reply_text = random.choice(["🐶 狗狗來了！", "汪！🐾", "🐶 今日狗狗！"])
+
+        elif re.search(r'抽寶可夢|今日寶可夢|來隻寶可夢', text):
+            reply_text = fetch_random_pokemon()
+
+        elif re.match(r'^配對', text):
+            reply_text = handle_pairing(text)
+
+        elif re.search(r'搖骰子|擲骰子|搖\d*[顆個]骰', text):
+            reply_text = handle_dice(text)
+
+        elif re.match(r'^猜拳', text):
+            reply_text = handle_rps(text)
+
+        elif re.search(r'給我建議|今日忠告', text):
+            reply_text = fetch_advice()
+
         elif re.search(r'倒數|還有幾天|距離', text):
             reply_text = handle_countdown(text)
 
@@ -627,15 +765,21 @@ def handle_message(event):
               or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
             reply_text = handle_mention(text, member=member_label)
 
-        if not reply_text:
+        if not reply_text and not reply_image_url:
             return
+
+        messages = []
+        if reply_text:
+            messages.append(TextMessage(text=reply_text))
+        if reply_image_url:
+            messages.append(ImageMessage(
+                original_content_url=reply_image_url,
+                preview_image_url=reply_image_url,
+            ))
 
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text=reply_text)]
-            )
+            ReplyMessageRequest(reply_token=reply_token, messages=messages)
         )
 
 
