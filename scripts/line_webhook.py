@@ -426,21 +426,29 @@ def fetch_animal_image(animal: str) -> str | None:
 
 
 def fetch_nasa_apod() -> tuple[str, str | None]:
-    try:
-        r = requests.get(
-            "https://api.nasa.gov/planetary/apod",
-            params={"api_key": NASA_API_KEY},
-            timeout=10,
-        )
-        d = r.json()
-        title = d.get("title", "")
-        explanation = (d.get("explanation") or "")[:400]
-        media_type = d.get("media_type", "image")
-        url = d.get("url", "") if media_type == "image" else None
-        text = f"🌌 今日宇宙：{title}\n{explanation}..."
-        return text, url
-    except Exception:
-        return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
+    for attempt in range(3):
+        try:
+            r = requests.get(
+                "https://api.nasa.gov/planetary/apod",
+                params={"api_key": NASA_API_KEY},
+                timeout=25 if attempt == 0 else 40,
+            )
+            d = r.json()
+            title = d.get("title", "")
+            explanation = (d.get("explanation") or "")[:400]
+            media_type = d.get("media_type", "image")
+            url = d.get("url", "") if media_type == "image" else None
+            text = f"🌌 今日宇宙：{title}\n{explanation}..."
+            return text, url
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                import time
+                time.sleep(2)
+                continue
+            return "🌌 NASA 伺服器回應較慢，請稍後再試 🌌", None
+        except Exception:
+            return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
+    return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
 
 
 # ─── RapidAPI 共用 helper ─────────────────────────────────
