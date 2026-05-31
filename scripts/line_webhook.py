@@ -3,6 +3,8 @@ import re
 import random
 import threading
 import requests
+from datetime import datetime
+from goal_tracker import TW_TZ
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -19,6 +21,7 @@ from goal_tracker import (
     log_chat_message, get_memories, get_streak,
     get_last_cycle_id, get_next_cycle_id, get_next_cycle_start,
     add_personal_memory, get_personal_memories,
+    add_todo, get_todos, complete_todo_by_content,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -46,6 +49,7 @@ _SKIP_LOG = {
     "來隻貓", "貓貓", "來貓", "來隻狗", "狗狗", "來狗",
     "抽寶可夢", "今日寶可夢", "給我建議", "今日忠告",
     "今日食譜", "隨機食譜", "推薦電影", "今日電影", "隨機電影",
+    "待辦", "查提醒", "查待辦",
 }
 
 
@@ -428,6 +432,77 @@ def fetch_horoscope(text) -> str:
         )
     except Exception:
         return "🔮 占星師在睡覺，待會再問 😴"
+
+
+def _parse_reminder_date(s: str) -> str | None:
+    from datetime import timedelta
+    today = datetime.now(TW_TZ).date()
+    if s in ["今天"]:
+        return today.strftime("%Y-%m-%d")
+    if s in ["明天", "明日"]:
+        return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    if s in ["後天"]:
+        return (today + timedelta(days=2)).strftime("%Y-%m-%d")
+    m = re.match(r'^(\d{1,2})[/月](\d{1,2})日?$', s)
+    if m:
+        try:
+            from datetime import date as _d
+            mo, dy = int(m.group(1)), int(m.group(2))
+            t = _d(today.year, mo, dy)
+            if t < today:
+                t = _d(today.year + 1, mo, dy)
+            return t.strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+    return None
+
+
+def handle_add_todo(member: str, text: str) -> str:
+    # 提醒我 明天 交報告
+    m = re.match(r'^提醒我\s+(\S+)\s+(.+)', text)
+    if m:
+        target, date_s, content = member or "你", m.group(1), m.group(2)
+    else:
+        # 提醒 太后 明天 交報告
+        m = re.match(r'^提醒\s+(\S+)\s+(\S+)\s+(.+)', text)
+        if not m:
+            return "格式：提醒 [人名] [日期] [事項]\n或：提醒我 明天 要做XXX\n日期支援：今天/明天/後天/6/5"
+        target, date_s, content = m.group(1), m.group(2), m.group(3)
+
+    date_str = _parse_reminder_date(date_s)
+    if not date_str:
+        return f"看不懂日期「{date_s}」\n支援：今天/明天/後天/6月5日/6/5"
+
+    ok = add_todo(target, date_str, content, member or "")
+    if not ok:
+        return "記錄失敗，等一下再試 😢"
+    date_display = date_str[5:].replace("-", "/")
+    by_str = f"（{member} 幫你記的）" if target != member and member else ""
+    return f"✅ 已幫 {target} 記下！\n📅 {date_display}：{content}{by_str}\n前一天晚上和當天都會提醒 🔔"
+
+
+def handle_view_todos() -> str:
+    todos = get_todos(status="待辦")
+    if not todos:
+        return "🎉 目前沒有待辦事項！"
+    today = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+    lines = ["📋 待辦事項：\n"]
+    for t in sorted(todos, key=lambda x: x["date"]):
+        date_display = t["date"][5:].replace("-", "/")
+        overdue = " ⚠️ 逾期" if t["date"] < today else ""
+        by = f"（{t['created_by']} 記的）" if t["created_by"] and t["created_by"] != t["member"] else ""
+        lines.append(f"• {t['member']}｜{date_display} {t['content']}{overdue}{by}")
+    return "\n".join(lines)
+
+
+def handle_complete_todo(member: str, text: str) -> str | None:
+    content = re.sub(r'^完成待辦\s*', '', text).strip()
+    if not content:
+        return None
+    result = complete_todo_by_content(member, content)
+    if result:
+        return f"✅ 完成！「{result['content']}」從待辦清單移除 🎉"
+    return f"找不到「{content}」在你的待辦裡"
 
 
 def handle_leave(_):
@@ -829,6 +904,16 @@ def handle_message(event):
 
         elif re.search(r'今日(牡羊|白羊|金牛|雙子|巨蟹|獅子|處女|天秤|天蠍|射手|摩羯|水瓶|雙魚)', text):
             reply_text = fetch_horoscope(text)
+
+        # ── 待辦 ──
+        elif re.match(r'^提醒(我|\s)', text):
+            reply_text = handle_add_todo(member_label, text)
+
+        elif text in ("待辦", "查提醒", "查待辦"):
+            reply_text = handle_view_todos()
+
+        elif re.match(r'^完成待辦', text):
+            reply_text = handle_complete_todo(member_label, text) or f"格式：完成待辦 [事項名稱]"
 
         elif re.search(r'倒數|還有幾天|距離', text):
             reply_text = handle_countdown(text)

@@ -465,6 +465,78 @@ def get_personal_memories(member, days=14) -> list:
         return []
 
 
+# ─── Todo / Reminder ─────────────────────────────────────
+
+def add_todo(member: str, date_str: str, content: str, created_by: str) -> bool:
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token = _get_token()
+        now_str = _now().strftime("%Y-%m-%d %H:%M")
+        _sheets_append(token, "待辦!A:F", [[now_str, date_str, member, content, "待辦", created_by]])
+        return True
+    except Exception:
+        return False
+
+
+def get_todos(member: str | None = None, status: str | None = "待辦") -> list[dict]:
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "待辦!A:F")
+        result = []
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) < 5:
+                continue
+            todo = {
+                "row": i,
+                "date": row[1] if len(row) > 1 else "",
+                "member": row[2] if len(row) > 2 else "",
+                "content": row[3] if len(row) > 3 else "",
+                "status": row[4] if len(row) > 4 else "待辦",
+                "created_by": row[5] if len(row) > 5 else "",
+            }
+            if member and todo["member"] != member:
+                continue
+            if status and todo["status"] != status:
+                continue
+            result.append(todo)
+        return result
+    except Exception:
+        return []
+
+
+def complete_todo_by_content(member: str, content: str) -> dict | None:
+    """Mark matching pending todo as done. Returns todo dict or None."""
+    if not GOAL_SHEET_ID:
+        return None
+    try:
+        token = _get_token()
+        todos = get_todos(member=member, status="待辦")
+        matched = next(
+            (t for t in todos if content in t["content"] or t["content"] in content),
+            None,
+        )
+        if not matched:
+            return None
+        _sheets_update(token, f"待辦!E{matched['row']}", [["已完成"]])
+        return matched
+    except Exception:
+        return None
+
+
+def get_todos_by_date(date_str: str) -> list[dict]:
+    """Get all pending todos due on a specific date."""
+    return [t for t in get_todos(status="待辦") if t["date"] == date_str]
+
+
+def get_overdue_todos() -> list[dict]:
+    """Get todos past their due date that are still pending."""
+    today = _now().strftime("%Y-%m-%d")
+    return [t for t in get_todos(status="待辦") if t["date"] < today]
+
+
 # ─── Next cycle info ──────────────────────────────────────
 
 def get_next_cycle_start() -> str:

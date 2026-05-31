@@ -9,9 +9,11 @@
 
 import os
 import requests
+from datetime import datetime, timedelta, timezone
 from goal_tracker import (
     get_cycle_info, get_checkin_stats, get_goals,
-    get_today_checkins, build_summary_text, get_next_cycle_start
+    get_today_checkins, build_summary_text, get_next_cycle_start,
+    get_todos_by_date, get_overdue_todos, TW_TZ,
 )
 
 MEMBERS = ["太后", "毛毛", "二毛"]
@@ -116,6 +118,38 @@ def build_day1_reminder(cycle_id, total):
     )
 
 
+def check_todos():
+    now = datetime.now(TW_TZ)
+    today = now.strftime("%Y-%m-%d")
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # 前一天提醒（明天要做的）
+    tmr_todos = get_todos_by_date(tomorrow)
+    if tmr_todos:
+        lines = ["⏰ 明天待辦提醒！\n"]
+        for t in tmr_todos:
+            lines.append(f"📌 {t['member']}：{t['content']}")
+        lines.append("\n記得完成後傳「完成待辦 [事項]」")
+        send_line_message("\n".join(lines))
+
+    # 當天提醒（今天要做的）
+    today_todos = get_todos_by_date(today)
+    if today_todos:
+        lines = ["📢 今日待辦！快去做！\n"]
+        for t in today_todos:
+            lines.append(f"📌 {t['member']}：{t['content']}")
+        send_line_message("\n".join(lines))
+
+    # 公審：逾期未完成
+    overdue = get_overdue_todos()
+    if overdue:
+        lines = ["📢 公審時間！\n"]
+        for t in overdue:
+            lines.append(f"⚠️ {t['member']} 說要做「{t['content']}」，到現在還沒做！！")
+        lines.append("\n快來問問他們怎麼了 👀👀👀")
+        send_line_message("\n".join(lines))
+
+
 def main():
     cycle_id, day, total = get_cycle_info()
     sent = []
@@ -149,6 +183,10 @@ def main():
         send_line_message(build_summary_text(cycle_id))
         send_line_message(build_next_cycle_reminder())
         sent.append("cycle summary + next cycle")
+
+    # 待辦提醒 + 公審
+    check_todos()
+    sent.append("todo check")
 
     print(f"Day {day}/{total}: sent {sent}")
 
