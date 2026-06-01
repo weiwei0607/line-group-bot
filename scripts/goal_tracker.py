@@ -9,6 +9,7 @@ Sheets 結構:
 
 import os
 import time
+import threading
 import calendar
 import requests
 from datetime import datetime, timezone, timedelta
@@ -490,8 +491,8 @@ def log_chat_message(member, message) -> None:
         token = _get_token()
         now_str = _now().strftime("%Y-%m-%d %H:%M")
         _sheets_append(token, "聊天記錄!A:C", [[now_str, member, message]])
-    except Exception:
-        pass
+    except Exception as _exc:
+        import logging; logging.getLogger(__name__).warning("Silent error: %s", _exc)
 
 
 def get_today_chat_logs() -> list:
@@ -681,8 +682,8 @@ def update_last_activity():
                 _sheets_update(token, f"設定!B{i}", [[now_str]])
                 return
         _sheets_append(token, "設定!A:B", [["last_activity", now_str]])
-    except Exception:
-        pass
+    except Exception as _exc:
+        import logging; logging.getLogger(__name__).warning("Silent error: %s", _exc)
 
 
 def get_last_activity():

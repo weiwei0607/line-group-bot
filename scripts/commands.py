@@ -27,6 +27,7 @@ from goal_tracker import (
 )
 
 from api_helpers import *
+from utils import send_telegram_alert
 from state import quiz_get, quiz_set, quiz_delete, vote_get, vote_set, vote_delete, translate_get, translate_delete, remove_bg_get, remove_bg_set, rate_limit_check
 from weather import send_morning_greeting, _parse_date_offset, get_weather_v2
 from horoscope import fetch_horoscope
@@ -502,6 +503,7 @@ def handle_message(event):
                     wrong = [_html.unescape(w) for w in res[0].get("incorrect_answers", [])]
             except Exception as _exc:
                 logging.warning("opentdb error: %s", _exc)
+                send_telegram_alert(f"opentdb error: {_exc}")
             # API Ninjas fallback（沒有選項，只給填空）
             if not question:
                 d = _ninja("/v1/trivia")
@@ -878,6 +880,7 @@ def handle_audio(event):
             audio_bytes = blob_api.get_message_content(event.message.id)
         except Exception as _exc:
             logging.warning("get_message_content error: %s", _exc)
+            send_telegram_alert(f"get_message_content (audio) error: {_exc}")
             return
         # Reply immediately, push result after Shazam finishes
         MessagingApi(api_client).reply_message(
@@ -909,6 +912,7 @@ def handle_image(event):
             img_bytes = blob_api.get_message_content(event.message.id)
         except Exception as _exc:
             logging.warning("get_message_content error: %s", _exc)
+            send_telegram_alert(f"get_message_content (image) error: {_exc}")
             return
 
         line_api = MessagingApi(api_client)

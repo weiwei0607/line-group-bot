@@ -133,6 +133,7 @@ def get_display_name(api_client, group_id, user_id):
         profile = line_bot_api.get_group_member_profile(group_id, user_id)
         return profile.display_name
     except Exception as _exc:
+        logger.warning("get_group_member_profile error: %s", _exc)
         return "某人"
 
 
@@ -210,6 +211,7 @@ def fetch_movie_quote() -> str:
             return "🎬 沒有台詞，待會再試"
         return f"🎬 「{content}」\n—《{movie}》"
     except Exception as _exc:
+        logger.warning("movie quote error: %s", _exc)
         return "🎬 沒有台詞，待會再試"
 
 
@@ -337,6 +339,7 @@ def fetch_cocktail(name: str = None) -> str:
             ings, drink.get("strInstructions", ""),
         )
     except Exception as _exc:
+        logger.warning("cocktail error: %s", _exc)
         return "🍹 調酒師不在，待會再試"
 
 
@@ -694,6 +697,7 @@ def fetch_country(name: str) -> str:
             f"貨幣：{currs or '—'}"
         )
     except Exception as _exc:
+        logger.warning("country info error: %s", _exc)
         return f"😢 找不到「{name}」的資料"
 
 
@@ -716,6 +720,7 @@ def fetch_book(query: str) -> str:
             lines.append(f"• {title}{year_str}\n  作者：{authors}")
         return "\n".join(lines)
     except Exception as _exc:
+        logger.warning("book search error: %s", _exc)
         return "📚 書籍查詢暫時失敗"
 
 
@@ -955,6 +960,7 @@ def fetch_pokemon_detail(name: str) -> str:
             sprite,
         )
     except Exception as _exc:
+        logger.warning("pokemon error: %s", _exc)
         return f"找不到寶可夢「{name}」，確認英文名或 ID 是否正確", None
 
 
