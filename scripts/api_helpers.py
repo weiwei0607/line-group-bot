@@ -1300,6 +1300,7 @@ def handle_view_goals():
         )
 
     log = get_checkin_log(cycle_id)
+    completed = get_completed_goals(cycle_id)
     lines = [f"🎯 本週期目標（第 {day}/{total} 天）\n"]
     all_members = sorted(set(list(goals.keys()) + list(stats.keys())))
     for member in all_members:
@@ -1308,10 +1309,13 @@ def handle_view_goals():
         lines.append(f"👤 {member}")
         if member_goals:
             for g in member_goals:
-                cnt = _goal_days(member_log, g, total)
-                bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
                 kw = _goal_keyword(g)
-                lines.append(f"  {kw}｜{bar} {cnt}/{total}")
+                if is_goal_completed(member, g, completed):
+                    lines.append(f"  ✅ {kw}｜已完成")
+                else:
+                    cnt = _goal_days(member_log, g, total)
+                    bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
+                    lines.append(f"  {kw}｜{bar} {cnt}/{total}")
         else:
             checked = stats.get(member, [])
             bar = "🟩" * len(checked) + "⬜" * max(0, total - len(checked))

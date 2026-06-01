@@ -63,6 +63,7 @@ def handle_message(event):
                 "\n🎯 十日目標\n"
                 "設目標：目標1 / 目標2\n"
                 "打卡 今天做了XXX\n"
+                "完成 目標名稱（一次性的目標直接完成）\n"
                 "查目標 / 進度 / 今日打卡\n"
                 "我的打卡 / 上週期\n"
                 "幫我想目標\n"
@@ -255,6 +256,30 @@ def handle_message(event):
             goals_dict = get_goals(cycle_id)
             user_goals = goals_dict.get(member_label)
             reply_text = handle_checkin(member_label, text, user_goals)
+
+        # ── 十日目標：完成單項目標 ──
+        elif text.startswith("完成 "):
+            goal_input = text[3:].strip()
+            cycle_id, _, _ = get_cycle_info()
+            goals_dict = get_goals(cycle_id)
+            user_goals = goals_dict.get(member_label, [])
+            if not user_goals:
+                reply_text = "你這週期還沒設目標，先輸入：設目標：目標1 / 目標2"
+            else:
+                matched = None
+                for g in user_goals:
+                    if goal_input.lower() in g.lower() or g.lower() in goal_input.lower():
+                        matched = g
+                        break
+                if matched:
+                    from goal_tracker import complete_goal
+                    if complete_goal(member_label, matched):
+                        reply_text = f"✅ 已將「{matched}」標記為完成！"
+                    else:
+                        reply_text = "標記失敗，請稍後再試 😢"
+                else:
+                    goals_preview = "\n".join(f"  • {g}" for g in user_goals)
+                    reply_text = f"找不到符合的目標，你的目標是：\n{goals_preview}"
 
         # ── 十日目標：查詢 ──
         elif text in ("查目標", "看目標", "目標"):

@@ -410,6 +410,7 @@ def build_summary_text(cycle_id=None) -> str:
     goals = get_goals(cycle_id)
     log = get_checkin_log(cycle_id)
     stats = get_checkin_stats(cycle_id)
+    completed = get_completed_goals(cycle_id)
     all_members = sorted(set(list(goals.keys()) + list(stats.keys())))
 
     lines = [f"📊 十日目標週期總結（{cycle_id}）\n"]
@@ -419,11 +420,14 @@ def build_summary_text(cycle_id=None) -> str:
         lines.append(f"👤 {member}")
         if member_goals:
             for g in member_goals:
-                cnt = _goal_days_from_log(member_log, g)
-                bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
                 kw = _goal_keyword(g)
-                emoji = "🏆" if cnt >= total * 0.8 else ("✅" if cnt >= total * 0.5 else "⚠️")
-                lines.append(f"  {emoji} {kw}｜{bar} {cnt}/{total}")
+                if is_goal_completed(member, g, completed):
+                    lines.append(f"  ✅ {kw}｜已完成")
+                else:
+                    cnt = _goal_days_from_log(member_log, g)
+                    bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
+                    emoji = "🏆" if cnt >= total * 0.8 else ("✅" if cnt >= total * 0.5 else "⚠️")
+                    lines.append(f"  {emoji} {kw}｜{bar} {cnt}/{total}")
         else:
             checked = len(stats.get(member, []))
             bar = "🟩" * checked + "⬜" * max(0, total - checked)
@@ -766,3 +770,55 @@ def get_today_birthdays() -> list[str]:
         ]
     except Exception:
         return []
+
+
+# ─── Goal completion (one-time goals) ─────────────────────
+
+def complete_goal(member: str, goal: str, cycle_id: str | None = None) -> bool:
+    """Mark a specific goal as completed for the cycle."""
+    if not GOAL_SHEET_ID:
+        return False
+    if cycle_id is None:
+        cycle_id, _, _ = get_cycle_info()
+    try:
+        token = _get_token()
+        now_str = _now().strftime("%Y-%m-%d %H:%M")
+        _sheets_append(token, "完成!A:D", [[cycle_id, member, goal, now_str]])
+        return True
+    except Exception:
+        return False
+
+
+def get_completed_goals(cycle_id: str | None = None) -> dict[str, set[str]]:
+    """Returns {member: {goal1, goal2, ...}} for completed goals."""
+    if not GOAL_SHEET_ID:
+        return {}
+    if cycle_id is None:
+        cycle_id, _, _ = get_cycle_info()
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "完成!A:D")
+        result: dict[str, set[str]] = {}
+        for row in rows[1:]:
+            if len(row) >= 3 and row[0] == cycle_id:
+                member, goal = row[1], row[2]
+                result.setdefault(member, set()).add(goal)
+        return result
+    except Exception:
+        return {}
+
+
+def is_goal_completed(member: str, goal: str, completed: dict[str, set[str]] | None = None) -> bool:
+    """Check if a goal (or its keyword variant) is marked completed."""
+    if completed is None:
+        completed = get_completed_goals()
+    member_completed = completed.get(member, set())
+    # Exact match
+    if goal in member_completed:
+        return True
+    # Keyword fuzzy match
+    kw = _goal_keyword(goal).lower()
+    for c in member_completed:
+        if kw in c.lower() or c.lower() in kw:
+            return True
+    return False
