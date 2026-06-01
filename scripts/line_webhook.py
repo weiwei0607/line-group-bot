@@ -56,6 +56,7 @@ _NINJA_KEYS = [k for k in [
 BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
 BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 MEMBERS = ["太后", "毛毛", "二毛"]
+_MEMBER_ZODIACS = {"太后": "雙子", "毛毛": "金牛", "二毛": "魔羯"}
 LINE_GROUP_ID = os.environ.get("LINE_GROUP_ID", "")
 
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -1689,8 +1690,8 @@ def fetch_horoscope_for_sign(sign_zh: str) -> str:
 def fetch_horoscope(text) -> str:
     sign_zh = next((k for k in _ZODIAC if k in text), None)
     if not sign_zh:
-        # 嘗試自動跑所有已綁定星座的成員
-        members = get_all_zodiacs()
+        # 優先用 sheet，沒有就用 hardcoded 預設
+        members = get_all_zodiacs() or [(None, nick, zodiac + "座") for nick, zodiac in _MEMBER_ZODIACS.items()]
         if members:
             today = datetime.now(TW_TZ).strftime("%-m/%-d")
             lines = [f"🔮 今日運勢（{today}）\n"]
