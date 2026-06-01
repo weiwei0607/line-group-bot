@@ -5,33 +5,41 @@ Extracted from line_webhook.py.
 
 import os
 import re
-import html as _html
 import random
 import threading
 import requests
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from goal_tracker import TW_TZ
 from goal_tracker import (
-    get_cycle_info, set_goals, get_goals, add_checkin,
-    get_checkin_stats, get_checkin_log, get_today_checkins, build_summary_text,
-    get_nickname, set_nickname, update_last_activity,
-    log_chat_message, get_memories, get_streak,
-    get_last_cycle_id, get_next_cycle_id, get_next_cycle_start,
-    add_personal_memory, get_personal_memories,
-    add_todo, get_todos, complete_todo_by_content,
-    get_zodiac, set_zodiac, get_all_zodiacs, set_zodiac_by_nickname,
+    get_cycle_info, get_goals, get_checkin_stats,
+    set_nickname, update_last_activity,
+    log_chat_message, get_streak,
+    set_zodiac, get_all_zodiacs, set_zodiac_by_nickname,
     add_quiz_score, get_quiz_scores, get_week_chat_logs,
-    set_birthday_by_nickname, get_today_birthdays,
-    get_all_nicknames, get_user_id_by_nickname,
+    set_birthday_by_nickname, get_all_nicknames,
 )
 
 from api_helpers import *
 from utils import send_telegram_alert
 from state import quiz_get, quiz_set, quiz_delete, vote_get, vote_set, vote_delete, translate_get, translate_delete, remove_bg_get, remove_bg_set, rate_limit_check
-from weather import send_morning_greeting, _parse_date_offset, get_weather_v2
+from weather import (
+    send_morning_greeting, _parse_date_offset, get_weather_v2,
+    handle_countdown, handle_who_pays, handle_draw_lots, handle_translate,
+    handle_joke, handle_fun_fact,
+)
 from horoscope import fetch_horoscope
 from dispatch import try_dispatch
+from handlers.goals import (
+    handle_set_goals, handle_checkin, handle_view_goals,
+    handle_cycle_progress, handle_today_checkins, handle_last_cycle,
+    handle_suggest_goals,
+)
+from handlers.todos import handle_add_todo, handle_view_todos, handle_complete_todo
+from handlers.quick_replies import (
+    handle_leave, handle_overtime, handle_tired,
+    handle_food, handle_travel, handle_japanese_question,
+)
 
 # LINE messaging configuration (local copy to avoid circular imports)
 _configuration = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))
@@ -358,7 +366,7 @@ def handle_message(event):
             checked = sorted(stats.get(member_label, []))
             streak = get_streak(member_label)
             if not checked:
-                reply_text = f"你這週期還沒打卡喔！快去打卡 💪\n指令：打卡 今天做了XXX"
+                reply_text = "你這週期還沒打卡喔！快去打卡 💪\n指令：打卡 今天做了XXX"
             else:
                 bar = "🟩" * len(checked) + "⬜" * (total - len(checked))
                 days_str = "、".join(f"第{d}天" for d in checked)
@@ -398,7 +406,7 @@ def handle_message(event):
             reply_text = handle_view_todos()
 
         elif re.match(r'^完成待辦', text):
-            reply_text = handle_complete_todo(member_label, text) or f"格式：完成待辦 [事項名稱]"
+            reply_text = handle_complete_todo(member_label, text) or "格式：完成待辦 [事項名稱]"
 
         elif re.search(r'倒數|還有幾天|距離', text):
             reply_text = handle_countdown(text)
@@ -896,7 +904,7 @@ def handle_image(event):
         # ── NSFW 自動偵測 ──
         try:
             is_nsfw = check_nsfw(img_bytes)
-        except Exception as _exc:
+        except Exception:
             is_nsfw = False
 
         if is_nsfw:
