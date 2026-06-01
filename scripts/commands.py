@@ -7,7 +7,6 @@ import os
 import re
 import random
 import threading
-import logging
 from goal_tracker import (
     get_cycle_info, get_goals, get_checkin_stats,
     set_nickname, update_last_activity,
@@ -18,8 +17,7 @@ from goal_tracker import (
 )
 
 from api_helpers import *
-from utils import send_telegram_alert
-from state import translate_get, translate_delete, remove_bg_get, remove_bg_set, rate_limit_check
+from state import translate_get, translate_delete, rate_limit_check
 from weather import (
     send_morning_greeting, _parse_date_offset, get_weather_v2,
     handle_countdown, handle_translate,
@@ -656,82 +654,14 @@ def handle_message(event):
 
 def handle_audio(event):
     """Shazam: identify song from audio message."""
-    reply_token = event.reply_token
-    with ApiClient(configuration) as api_client:
-        try:
-            blob_api = MessagingApiBlob(api_client)
-            audio_bytes = blob_api.get_message_content(event.message.id)
-        except Exception as _exc:
-            logging.warning("get_message_content error: %s", _exc)
-            send_telegram_alert(f"get_message_content (audio) error: {_exc}")
-            return
-        # Reply immediately, push result after Shazam finishes
-        MessagingApi(api_client).reply_message(
-            ReplyMessageRequest(reply_token=reply_token,
-                                messages=[TextMessage(text="🎵 辨識中，請稍候...")])
-        )
-    def _run():
-        result = shazam_identify(audio_bytes)
-        _push_messages([{"type": "text", "text": result}])
-    threading.Thread(target=_run, daemon=True).start()
+    from handlers.media import handle_audio as _handle_audio
+    _handle_audio(event, configuration)
 
 
 def handle_image(event):
     """NSFW detection + background removal for image messages."""
-    reply_token = event.reply_token
-    user_id = event.source.user_id if hasattr(event.source, "user_id") else None
-
-    # Rate limiting for image uploads (10 / 60s)
-    if user_id and not rate_limit_check(user_id, max_requests=10, window_seconds=60):
-        with ApiClient(configuration) as api_client:
-            api_client.default_api.reply_message(
-                ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text="⏳ 圖片發太快了，請稍後再試 👋")])
-            )
-        return
-
-    with ApiClient(configuration) as api_client:
-        try:
-            blob_api = MessagingApiBlob(api_client)
-            img_bytes = blob_api.get_message_content(event.message.id)
-        except Exception as _exc:
-            logging.warning("get_message_content error: %s", _exc)
-            send_telegram_alert(f"get_message_content (image) error: {_exc}")
-            return
-
-        line_api = MessagingApi(api_client)
-
-        # ── 去背 pending flow ──
-        if user_id and remove_bg_get(user_id):
-            remove_bg_set(user_id, False)
-            line_api.reply_message(ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text="🖼️ 去背處理中，請稍候...")],
-            ))
-            def _do_remove_bg():
-                result_url = remove_background(img_bytes)
-                if result_url:
-                    _push_messages([
-                        {"type": "text", "text": "✅ 去背完成！"},
-                        {"type": "image",
-                         "originalContentUrl": result_url,
-                         "previewImageUrl": result_url},
-                    ])
-                else:
-                    _push_messages([{"type": "text", "text": "去背失敗，請稍後再試 😢"}])
-            threading.Thread(target=_do_remove_bg, daemon=True).start()
-            return
-
-        # ── NSFW 自動偵測 ──
-        try:
-            is_nsfw = check_nsfw(img_bytes)
-        except Exception:
-            is_nsfw = False
-
-        if is_nsfw:
-            line_api.reply_message(ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text="⚠️ 偵測到不雅圖片，小棉襖不允許這種內容喔！")],
-            ))
+    from handlers.media import handle_image as _handle_image
+    _handle_image(event, configuration)
 
 
 def handle_join(event):
