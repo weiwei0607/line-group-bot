@@ -149,14 +149,14 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
                 return d[0]
     except Exception:
         pass
-    # 2. 嘗試 Just Translated
+    # 2. 嘗試 Just Translated（目前 Yandex v1 回 410，保留待修復）
     try:
         tl = target.split("-")[0] if "-" in target else target
         r = requests.get(
             "https://just-translated.p.rapidapi.com/",
             headers={"x-rapidapi-host": "just-translated.p.rapidapi.com", "x-rapidapi-key": (_RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "")},
             params={"lang": tl, "text": text},
-            timeout=8,
+            timeout=3,
         )
         if r.status_code == 200:
             d = r.json()
