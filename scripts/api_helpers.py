@@ -1340,13 +1340,13 @@ def handle_cycle_progress():
 def handle_today_checkins():
     cycle_id, day, total = get_cycle_info()
     checkins = get_today_checkins(cycle_id)
+    goals = get_goals(cycle_id)
     if not checkins:
         return f"今天（第 {day} 天）還沒有人打卡！快去打卡 💪"
     lines = [f"📋 今日打卡（第 {day}/{total} 天）\n"]
     for member, content in checkins.items():
         lines.append(f"✅ {member}：{content}")
-    # Check who hasn't checked in
-    goals = get_goals(cycle_id)
+    # Check who hasn't checked in (include all members with goals)
     missing = [m for m in goals if m not in checkins]
     if missing:
         lines.append(f"\n還沒打卡：{' / '.join(missing)} 快去！")

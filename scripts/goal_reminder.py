@@ -24,34 +24,36 @@ def build_daily_checkin_reminder(cycle_id, day, total):
     goals = get_goals(cycle_id)
     today_checkins = get_today_checkins(cycle_id)
 
-    if not goals:
-        return None  # 沒人設目標就不提醒
-
-    missing = [m for m in goals if m not in today_checkins]
+    missing_checkin = [m for m in goals if m not in today_checkins]
     done = [m for m in goals if m in today_checkins]
+    no_goals = [m for m in MEMBERS if m not in goals]
 
-    if not missing:
-        # 所有人都打卡了
+    if not missing_checkin and not no_goals:
+        # 所有人都設了目標且都打卡了
         lines = [f"🎉 今天大家都打卡了！（第 {day}/{total} 天）\n"]
         for member, content in today_checkins.items():
             lines.append(f"✅ {member}：{content}")
         lines.append("\n繼續保持！💪")
         return "\n".join(lines)
-    else:
-        lines = [f"⏰ 今日打卡提醒（第 {day}/{total} 天）\n"]
-        if done:
-            for m in done:
-                lines.append(f"✅ {m} 已打卡")
-        for m in missing:
-            lines.append(f"❌ {m} 還沒打卡！")
-        lines.append(f"\n快去打卡！輸入：打卡 今天做了XXX")
-        return "\n".join(lines)
+
+    lines = [f"⏰ 今日打卡提醒（第 {day}/{total} 天）\n"]
+    if done:
+        for m in done:
+            lines.append(f"✅ {m} 已打卡")
+    for m in missing_checkin:
+        lines.append(f"❌ {m} 還沒打卡！")
+    for m in no_goals:
+        lines.append(f"⚠️ {m} 還沒設目標！")
+    lines.append(f"\n快去打卡！輸入：打卡 今天做了XXX")
+    if no_goals:
+        lines.append("還沒設目標的輸入：設目標：目標1 / 目標2 / 目標3")
+    return "\n".join(lines)
 
 
 def build_midcycle_reminder(cycle_id, day, total):
     stats = get_checkin_stats(cycle_id)
     goals = get_goals(cycle_id)
-    all_members = sorted(set(list(goals.keys()) + list(stats.keys())))
+    all_members = sorted(set(list(goals.keys()) + list(stats.keys()) + MEMBERS))
 
     lines = [f"📣 十日目標中期提醒（第 {day}/{total} 天）\n"]
     for member in all_members:
@@ -69,7 +71,7 @@ def build_midcycle_reminder(cycle_id, day, total):
 def build_final_reminder(cycle_id, day, total):
     stats = get_checkin_stats(cycle_id)
     goals = get_goals(cycle_id)
-    all_members = sorted(set(list(goals.keys()) + list(stats.keys())))
+    all_members = sorted(set(list(goals.keys()) + list(stats.keys()) + MEMBERS))
 
     lines = [f"⚡ 最後衝刺！週期還剩 {total - day + 1} 天\n"]
     for member in all_members:
