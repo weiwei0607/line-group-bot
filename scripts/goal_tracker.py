@@ -169,6 +169,21 @@ def set_zodiac(user_id, zodiac: str) -> bool:
         return False
 
 
+def set_zodiac_by_nickname(nickname: str, zodiac: str) -> bool:
+    """Set zodiac by nickname (col B match). Used for admin setup."""
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token, rows = _get_nickname_rows()
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 2 and row[1] == nickname:
+                _sheets_update(token, f"暱稱!C{i}", [[zodiac]])
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def get_all_zodiacs() -> list[tuple[str, str, str]]:
     """Returns list of (user_id, nickname, zodiac) for members with zodiac set."""
     if not GOAL_SHEET_ID:

@@ -26,7 +26,7 @@ from goal_tracker import (
     get_last_cycle_id, get_next_cycle_id, get_next_cycle_start,
     add_personal_memory, get_personal_memories,
     add_todo, get_todos, complete_todo_by_content,
-    get_zodiac, set_zodiac, get_all_zodiacs,
+    get_zodiac, set_zodiac, get_all_zodiacs, set_zodiac_by_nickname,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -2221,6 +2221,25 @@ def handle_message(event):
         # ── 隱藏指令 ──
         elif text == "!groupid":
             reply_text = f"Group ID: {group_id or '非群組訊息'}"
+
+        elif m := re.match(r'^!設星座\s+(\S+)\s+(.+)$', text):
+            nick_target, sign_input = m.group(1).strip(), m.group(2).strip().rstrip("座")
+            matched = next((k for k in _ZODIAC if k.rstrip("座") == sign_input or k == sign_input), None)
+            if matched:
+                ok = set_zodiac_by_nickname(nick_target, matched)
+                reply_text = f"✅ {nick_target} → {matched}" if ok else f"找不到暱稱「{nick_target}」，請確認他有登記「叫我」"
+            else:
+                reply_text = f"不認識「{sign_input}」，請用：{'、'.join(_ZODIAC.keys())}"
+
+        elif text == "!查星座":
+            members = get_all_zodiacs()
+            if members:
+                lines = ["🔮 目前星座綁定："]
+                for _, nick, zodiac in members:
+                    lines.append(f"  {nick}：{zodiac}")
+                reply_text = "\n".join(lines)
+            else:
+                reply_text = "還沒有人綁定星座"
 
         # ── 暱稱登記 ──
         elif nick_match := re.match(r'^叫我\s*(.+)$', text):
