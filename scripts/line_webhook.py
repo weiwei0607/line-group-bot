@@ -38,6 +38,7 @@ CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 NASA_API_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY")
+OWM_API_KEY = os.environ.get("OWM_API_KEY", "bb39ab43ad79bd6bdef878ea299e42b0")
 
 # 支援多把 key 輪班：RAPIDAPI_KEY, RAPIDAPI_KEY_2, RAPIDAPI_KEY_3 ...
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")  # kept for compat
@@ -598,27 +599,67 @@ def handle_translate(user_id: str, text: str) -> str:
 
 # ─── Weather upgrade ──────────────────────────────────────
 
+_OWM_CITY_MAP = {
+    "台北": "Taipei,TW", "新北": "New Taipei,TW", "桃園": "Taoyuan,TW",
+    "台中": "Taichung,TW", "台南": "Tainan,TW", "高雄": "Kaohsiung,TW",
+    "基隆": "Keelung,TW", "花蓮": "Hualien,TW", "台東": "Taitung,TW",
+    "宜蘭": "Yilan,TW", "嘉義": "Chiayi,TW", "新竹": "Hsinchu,TW",
+}
+
+_OWM_ICON = {
+    "clear sky": "☀️", "few clouds": "🌤", "scattered clouds": "⛅",
+    "broken clouds": "🌥", "overcast clouds": "☁️",
+    "light rain": "🌦", "moderate rain": "🌧", "heavy rain": "🌧",
+    "thunderstorm": "⛈", "snow": "❄️", "mist": "🌫", "fog": "🌫",
+    "haze": "🌫", "drizzle": "🌦",
+}
+
+
+def get_owm_weather(city_zh: str = "台北") -> dict | None:
+    q = _OWM_CITY_MAP.get(city_zh, f"{city_zh},TW")
+    try:
+        r = requests.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={"q": q, "appid": OWM_API_KEY, "units": "metric", "lang": "zh_tw"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None
+
+
+def format_owm_weather(city_zh: str = "台北") -> str:
+    d = get_owm_weather(city_zh)
+    if not d:
+        return get_weather(city_zh)
+    try:
+        desc = d["weather"][0].get("description", "")
+        desc_en = d["weather"][0].get("main", "").lower()
+        icon = next((v for k, v in _OWM_ICON.items() if k in desc_en or k in desc.lower()), "🌡")
+        temp = round(d["main"]["temp"])
+        feels = round(d["main"]["feels_like"])
+        humidity = d["main"]["humidity"]
+        wind = round(d["wind"]["speed"] * 3.6)  # m/s → km/h
+        rain = d.get("rain", {}).get("1h", 0) or d.get("rain", {}).get("3h", 0)
+        rain_str = f"　降雨 {rain}mm" if rain else ""
+        return (
+            f"{icon} {city_zh} 天氣\n"
+            f"{desc}　{temp}°C（體感 {feels}°C）\n"
+            f"濕度 {humidity}%　風速 {wind} km/h{rain_str}"
+        )
+    except Exception:
+        return get_weather(city_zh)
+
+
 def get_weather_v2(text: str) -> str:
     city = "台北"
     for c in TW_CITIES:
         if c in text:
             city = c
             break
-    d = _rapid("get", "weatherapi-com.p.rapidapi.com", "/current.json",
-               params={"q": city, "lang": "zh"})
-    if d is _QUOTA or not d:
-        return get_weather(text)  # fall back to free wttr.in
-    try:
-        loc = d["location"]["name"]
-        cur = d["current"]
-        return (
-            f"🌤 {loc} 天氣\n"
-            f"{cur['condition']['text']}　{cur['temp_c']}°C"
-            f"（體感 {cur['feelslike_c']}°C）\n"
-            f"濕度 {cur['humidity']}%　風速 {cur['wind_kph']} km/h"
-        )
-    except Exception:
-        return get_weather(text)
+    return format_owm_weather(city)
 
 
 # ─── Music ───────────────────────────────────────────────
@@ -2879,11 +2920,18 @@ def send_morning_greeting():
     weekday = weekdays[today.weekday()]
     date_str = today.strftime(f"%-m月%-d日 {weekday}")
 
-    # 取台北天氣
+    # 取台北天氣（OpenWeatherMap）
     weather_info = ""
     try:
-        r = requests.get("https://wttr.in/台北?format=%C+%t+%h&lang=zh&m", timeout=6)
-        weather_info = f"天氣：{r.text.strip()}"
+        d = get_owm_weather("台北")
+        if d:
+            desc = d["weather"][0].get("description", "")
+            temp = round(d["main"]["temp"])
+            humidity = d["main"]["humidity"]
+            rain = d.get("rain", {}).get("1h", 0) or d.get("rain", {}).get("3h", 0)
+            weather_info = f"台北天氣：{desc} {temp}°C 濕度{humidity}%"
+            if rain:
+                weather_info += f" 有雨{rain}mm，記得帶傘"
     except Exception:
         pass
 
