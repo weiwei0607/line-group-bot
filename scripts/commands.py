@@ -165,6 +165,25 @@ def handle_message(event):
             )
         return
 
+    # ── Fast-path: simple stateless dispatch ──
+    disp_text, disp_img = try_dispatch(text)
+    if disp_text is not None:
+        if disp_img:
+            from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage
+            with ApiClient(configuration) as api_client:
+                MessagingApi(api_client).reply_message(
+                    ReplyMessageRequest(
+                        reply_token=reply_token,
+                        messages=[
+                            TextMessage(text=disp_text[:4900]),
+                            ImageMessage(original_content_url=disp_img, preview_image_url=disp_img),
+                        ],
+                    )
+                )
+        else:
+            reply(reply_token, disp_text)
+        return
+
     # Update last activity + log message in background
     threading.Thread(target=update_last_activity, daemon=True).start()
 
@@ -353,25 +372,7 @@ def handle_message(event):
                     lines.append(streak_line)
                 reply_text = "\n".join(lines)
 
-        # ── Simple dispatch (fast path for stateless commands) ──
-        disp_text, disp_img = try_dispatch(text)
-        if disp_text is not None:
-            if disp_img:
-                with ApiClient(configuration) as api_client:
-                    MessagingApi(api_client).reply_message(
-                        ReplyMessageRequest(
-                            reply_token=reply_token,
-                            messages=[
-                                TextMessage(text=disp_text[:4900]),
-                                ImageMessage(original_content_url=disp_img, preview_image_url=disp_img),
-                            ],
-                        )
-                    )
-            else:
-                reply(reply_token, disp_text)
-            return
-
-        # ── 趣味功能 ──
+        # ── 趣味功能（fallback for partial matches not caught by dispatch）──
         elif re.search(r'今日運勢|運勢|占卜', text):
             _async_push(reply_token, "🔮 占星師施法中，請稍候...", fetch_horoscope, text)
             return
@@ -382,61 +383,12 @@ def handle_message(event):
         elif re.search(r'^(抽籤|幫我選|幫我決定|選一個)', text):
             reply_text = handle_draw_lots(text)
 
-        elif re.search(r'來隻貓|貓貓|來貓', text):
-            reply_image_url = fetch_cat_image()
-            reply_text = random.choice(["🐱 貓貓來了！", "喵～ 🐾", "🐱 今日貓貓！"])
-
-        elif re.search(r'來隻狗|狗狗|來狗', text):
-            reply_image_url = fetch_dog_image()
-            reply_text = random.choice(["🐶 狗狗來了！", "汪！🐾", "🐶 今日狗狗！"])
-
-        elif re.search(r'狐狸|來隻狐', text):
-            reply_image_url = fetch_fox_image()
-            reply_text = random.choice(["🦊 狐狸來了！", "🦊 今日狐狸！", "啾啾～ 🦊"])
-
-        elif re.search(r'柴柴|柴犬|來隻柴', text):
-            reply_image_url = fetch_shiba_image()
-            reply_text = random.choice(["🐕 柴柴！！", "wow such shiba 🐕", "今日柴柴！🐕"])
-
-        elif re.search(r'熊貓|來隻熊貓', text):
-            reply_image_url = fetch_animal_image("panda")
-            reply_text = random.choice(["🐼 熊貓！", "今日熊貓 🐼", "圓滾滾來了 🐼"])
-
-        elif re.search(r'無尾熊|來隻無尾熊|無尾熊', text):
-            reply_image_url = fetch_animal_image("koala")
-            reply_text = random.choice(["🐨 無尾熊！", "今日無尾熊 🐨", "抱抱樹 🐨"])
-
-        elif re.search(r'浣熊|來隻浣熊', text):
-            reply_image_url = fetch_animal_image("raccoon")
-            reply_text = random.choice(["🦝 浣熊！", "今日浣熊 🦝", "小偷熊來了 🦝"])
-
-        elif re.search(r'今日宇宙|NASA|宇宙照片', text):
-            reply_text, reply_image_url = fetch_nasa_apod()
-
-        elif re.search(r'抽寶可夢|今日寶可夢|來隻寶可夢', text):
-            reply_text = fetch_random_pokemon()
-
-        elif re.match(r'^配對', text):
-            reply_text = handle_pairing(text)
-
-        elif re.search(r'搖骰子|擲骰子|搖\d*[顆個]骰', text):
-            reply_text = handle_dice(text)
-
-        elif re.match(r'^猜拳', text):
-            reply_text = handle_rps(text)
-
-        elif re.search(r'給我建議|今日忠告', text):
-            reply_text = fetch_advice()
-
-        elif re.search(r'今日食譜|隨機食譜|吃什麼食譜|今天做什麼', text):
-            reply_text = fetch_random_meal()
-
-        elif re.search(r'推薦電影|今日電影|隨機電影|看什麼電影', text):
-            reply_text = fetch_random_movie()
-
-        elif re.search(r'今日(牡羊|白羊|金牛|雙子|巨蟹|獅子|處女|天秤|天蠍|射手|摩羯|水瓶|雙魚)', text):
-            _async_push(reply_token, "🔮 占星師施法中，請稍候...", fetch_horoscope, text)
-            return
+        elif re.search(r'^(今日運動|找運動)', text):
+            body_part = None
+            m2 = re.match(r'^找運動\s*(.+)$', text)
+            if m2:
+                body_part = m2.group(1).strip()
+            reply_text = fetch_exercise(body_part)
 
         # ── 待辦 ──
         elif re.match(r'^提醒(我|\s)', text):
