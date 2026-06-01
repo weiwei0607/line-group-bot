@@ -13,6 +13,7 @@ from goal_tracker import (
     get_cycle_info, get_checkin_stats, get_goals,
     get_today_checkins, build_summary_text, get_next_cycle_start,
     get_todos_by_date, get_overdue_todos, TW_TZ,
+    get_user_id_by_nickname,
 )
 from utils import send_line_message
 
@@ -20,7 +21,9 @@ MEMBERS = ["太后", "毛毛", "二毛"]
 
 
 def build_daily_checkin_reminder(cycle_id, day, total):
-    """每天晚上提醒還沒打卡的人。"""
+    """每天晚上提醒還沒打卡的人。
+    回傳 (text, mentions)，mentions 供 LINE @mention 使用。
+    """
     goals = get_goals(cycle_id)
     today_checkins = get_today_checkins(cycle_id)
 
@@ -34,20 +37,33 @@ def build_daily_checkin_reminder(cycle_id, day, total):
         for member, content in today_checkins.items():
             lines.append(f"✅ {member}：{content}")
         lines.append("\n繼續保持！💪")
-        return "\n".join(lines)
+        return "\n".join(lines), []
 
     lines = [f"⏰ 今日打卡提醒（第 {day}/{total} 天）\n"]
+    mentions = []
     if done:
         for m in done:
             lines.append(f"✅ {m} 已打卡")
     for m in missing_checkin:
-        lines.append(f"❌ {m} 還沒打卡！")
+        user_id = get_user_id_by_nickname(m)
+        if user_id:
+            idx = len("\n".join(lines) + "\n") if lines else 0
+            lines.append(f"@{m} 還沒打卡！")
+            mentions.append({"index": idx, "length": len(m) + 1, "userId": user_id})
+        else:
+            lines.append(f"❌ {m} 還沒打卡！")
     for m in no_goals:
-        lines.append(f"⚠️ {m} 還沒設目標！")
+        user_id = get_user_id_by_nickname(m)
+        if user_id:
+            idx = len("\n".join(lines) + "\n") if lines else 0
+            lines.append(f"@{m} 還沒設目標！")
+            mentions.append({"index": idx, "length": len(m) + 1, "userId": user_id})
+        else:
+            lines.append(f"⚠️ {m} 還沒設目標！")
     lines.append(f"\n快去打卡！輸入：打卡 今天做了XXX")
     if no_goals:
         lines.append("還沒設目標的輸入：設目標：目標1 / 目標2 / 目標3")
-    return "\n".join(lines)
+    return "\n".join(lines), mentions
 
 
 def build_midcycle_reminder(cycle_id, day, total):
@@ -149,9 +165,9 @@ def main():
             sent.append("day1 goal reminder")
 
     # 每天都發：今日打卡提醒
-    daily_msg = build_daily_checkin_reminder(cycle_id, day, total)
+    daily_msg, daily_mentions = build_daily_checkin_reminder(cycle_id, day, total)
     if daily_msg:
-        send_line_message(daily_msg)
+        send_line_message(daily_msg, mentions=daily_mentions)
         sent.append("daily checkin reminder")
 
     # 第 5 天額外發：中期提醒

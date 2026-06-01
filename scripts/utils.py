@@ -38,13 +38,18 @@ def call_gemini(prompt: str, timeout: int = 12) -> str | None:
 
 # ─── LINE Push ────────────────────────────────────────────
 
-def send_line_message(text: str, group_id: str | None = None) -> None:
-    """推送文字訊息到指定群組（預設讀環境變數 LINE_GROUP_ID）"""
+def send_line_message(text: str, group_id: str | None = None, mentions: list | None = None) -> None:
+    """推送文字訊息到指定群組（預設讀環境變數 LINE_GROUP_ID）
+    mentions: [{"userId": "Uxxx", "index": int, "length": int}, ...]
+    """
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
     gid = group_id or os.environ.get("LINE_GROUP_ID", "")
     if not token or not gid:
         print("[warn] send_line_message: missing token or group_id")
         return
+    msg = {"type": "text", "text": text}
+    if mentions:
+        msg["mention"] = {"mentionees": mentions}
     try:
         requests.post(
             "https://api.line.me/v2/bot/message/push",
@@ -52,7 +57,7 @@ def send_line_message(text: str, group_id: str | None = None) -> None:
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
             },
-            json={"to": gid, "messages": [{"type": "text", "text": text}]},
+            json={"to": gid, "messages": [msg]},
             timeout=10,
         )
     except Exception as exc:
