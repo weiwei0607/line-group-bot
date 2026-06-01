@@ -156,6 +156,56 @@ _QUOTA_TEXT = (
 )
 
 
+
+# ─── Simple text dispatch ─────────────────────────────
+_TEXT_DISPATCH = {
+    "配額": lambda: _QUOTA_TEXT,
+    "/配額": lambda: _QUOTA_TEXT,
+    "api配額": lambda: _QUOTA_TEXT,
+    "額度": lambda: _QUOTA_TEXT,
+    "查目標": lambda: handle_view_goals(),
+    "看目標": lambda: handle_view_goals(),
+    "目標": lambda: handle_view_goals(),
+    "今天第幾天": lambda: handle_cycle_progress(),
+    "幾天了": lambda: handle_cycle_progress(),
+    "進度": lambda: handle_cycle_progress(),
+    "打卡進度": lambda: handle_cycle_progress(),
+    "今天打卡了嗎": lambda: handle_today_checkins(),
+    "今日打卡": lambda: handle_today_checkins(),
+    "誰打卡了": lambda: handle_today_checkins(),
+    "上週期": lambda: handle_last_cycle(),
+    "上次總結": lambda: handle_last_cycle(),
+    "上輪總結": lambda: handle_last_cycle(),
+    "待辦": lambda: handle_view_todos(),
+    "查提醒": lambda: handle_view_todos(),
+    "查待辦": lambda: handle_view_todos(),
+    "電影台詞": lambda: fetch_movie_quote(),
+    "動漫語錄": lambda: fetch_anime_quote(),
+    "我好無聊": lambda: fetch_random_activity(),
+    "川普語錄": lambda: fetch_trump_quote(),
+    "諾里斯": lambda: fetch_chuck_norris(),
+    "今日日文單字": lambda: fetch_daily_japanese(),
+    "日文單字": lambda: fetch_daily_japanese(),
+    "學日文": lambda: fetch_daily_japanese(),
+    "今日漢字": lambda: fetch_daily_kanji(),
+    "學漢字": lambda: fetch_daily_kanji(),
+    "今日西文單字": lambda: fetch_daily_spanish(),
+    "西文單字": lambda: fetch_daily_spanish(),
+    "學西文": lambda: fetch_daily_spanish(),
+    "金價": lambda: fetch_gold_price(),
+    "今日金價": lambda: fetch_gold_price(),
+    "黃金價格": lambda: fetch_gold_price(),
+    "天文冷知識": lambda: fetch_astronomy_fact(),
+    "科學冷知識": lambda: fetch_astronomy_fact(),
+    "宇宙冷知識": lambda: fetch_astronomy_fact(),
+    "數字冷知識": lambda: fetch_number_fact(),
+    "數字趣聞": lambda: fetch_number_fact(),
+    "配對星座": lambda: "請傳「配對星座 星座1 星座2」\n例：配對星座 天蠍 金牛",
+    "新聞": lambda: fetch_news(),
+    "今日新聞": lambda: fetch_news(),
+    "最新新聞": lambda: fetch_news(),
+}
+
 def handle_message(event):
     text = event.message.text.strip()
     reply_token = event.reply_token
@@ -210,8 +260,8 @@ def handle_message(event):
             reply_text = _HELP_TEXT
 
         # ── 配額說明 ──
-        elif text in ("配額", "/配額", "api配額", "額度"):
-            reply_text = _QUOTA_TEXT
+        elif text in _TEXT_DISPATCH:
+            reply_text = _TEXT_DISPATCH[text]()
 
         # ── 隱藏指令 ──
         elif text == "!groupid":
@@ -344,17 +394,9 @@ def handle_message(event):
                     reply_text = f"找不到符合的目標，你的目標是：\n{goals_preview}"
 
         # ── 十日目標：查詢 ──
-        elif text in ("查目標", "看目標", "目標"):
-            reply_text = handle_view_goals()
 
-        elif text in ("今天第幾天", "幾天了", "進度", "打卡進度"):
-            reply_text = handle_cycle_progress()
 
-        elif text in ("今天打卡了嗎", "今日打卡", "誰打卡了"):
-            reply_text = handle_today_checkins()
 
-        elif text in ("上週期", "上次總結", "上輪總結"):
-            reply_text = handle_last_cycle()
 
         elif re.match(r'^幫我想目標', text):
             reply_text = handle_suggest_goals(member_label, text)
@@ -401,8 +443,6 @@ def handle_message(event):
         elif re.match(r'^提醒(我|\s)', text):
             reply_text = handle_add_todo(member_label, text)
 
-        elif text in ("待辦", "查提醒", "查待辦"):
-            reply_text = handle_view_todos()
 
         elif re.match(r'^完成待辦', text):
             reply_text = handle_complete_todo(member_label, text) or "格式：完成待辦 [事項名稱]"
@@ -434,8 +474,6 @@ def handle_message(event):
             reply_text = fetch_imdb(m.group(1).strip())
 
         # ── 電影台詞 ──
-        elif text == "電影台詞":
-            reply_text = fetch_movie_quote()
 
         # ── 在哪看 ──
         elif m := re.match(r'^在哪看\s*(.+)$', text):
@@ -461,16 +499,10 @@ def handle_message(event):
             reply_text = fetch_cocktail(name)
 
         # ── 動漫語錄 ──
-        elif text == "動漫語錄":
-            reply_text = fetch_anime_quote()
 
         # ── 我好無聊 ──
-        elif text == "我好無聊":
-            reply_text = fetch_random_activity()
 
         # ── 川普語錄 ──
-        elif text == "川普語錄":
-            reply_text = fetch_trump_quote()
 
         # ── 查超英 ──
         elif m := re.match(r'^查超英\s*(.+)$', text):
@@ -483,8 +515,6 @@ def handle_message(event):
             reply_image_url = meme_url
 
         # ── 諾里斯 ──
-        elif text == "諾里斯":
-            reply_text = fetch_chuck_norris()
 
         # ── 摘要 ──
         elif m := re.match(r'^摘要\s*(.+)$', text, re.DOTALL):
@@ -519,21 +549,15 @@ def handle_message(event):
         elif m := re.match(r'^查日文\s*(.+)$', text):
             reply_text = fetch_jisho(m.group(1).strip())
 
-        elif text in ("今日日文單字", "日文單字", "學日文"):
-            reply_text = fetch_daily_japanese()
 
         elif m := re.match(r'^漢字\s*([^\s])$', text):
             reply_text = fetch_kanji(m.group(1))
 
-        elif text in ("今日漢字", "學漢字"):
-            reply_text = fetch_daily_kanji()
 
         # ── 西班牙文字典 ──
         elif m := re.match(r'^查西文\s*(.+)$', text):
             reply_text = fetch_spanish(m.group(1).strip())
 
-        elif text in ("今日西文單字", "西文單字", "學西文"):
-            reply_text = fetch_daily_spanish()
 
         # ── 日文問題 ──
         elif (jp := handle_japanese_question(text)):
@@ -581,16 +605,10 @@ def handle_message(event):
             reply_text = fetch_calories_burned(activity, duration)
 
         # ── 金價 ──
-        elif text in ("金價", "今日金價", "黃金價格"):
-            reply_text = fetch_gold_price()
 
         # ── 天文冷知識 ──
-        elif text in ("天文冷知識", "科學冷知識", "宇宙冷知識"):
-            reply_text = fetch_astronomy_fact()
 
         # ── 數字冷知識 ──
-        elif text in ("數字冷知識", "數字趣聞"):
-            reply_text = fetch_number_fact()
 
         # ── 食譜 [食材] ──
         elif m := re.match(r'^食譜\s+(.+)$', text):
@@ -623,12 +641,8 @@ def handle_message(event):
             _async_push(reply_token, "💫 星座配對計算中...", match_zodiac, s1, s2)
             return
 
-        elif text == "配對星座":
-            reply_text = "請傳「配對星座 星座1 星座2」\n例：配對星座 天蠍 金牛"
 
         # ── 新聞 ──
-        elif text in ("新聞", "今日新聞", "最新新聞"):
-            reply_text = fetch_news()
 
         elif (vote_result := handle_vote(text, group_id, member_label)) is not None:
             reply_text = vote_result
