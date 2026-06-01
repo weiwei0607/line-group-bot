@@ -4,6 +4,7 @@ import base64
 import random
 import threading
 import requests
+from collections import deque
 from datetime import datetime
 from goal_tracker import TW_TZ
 from flask import Flask, request, abort
@@ -417,6 +418,9 @@ def fetch_animal_image(animal: str) -> str | None:
 
 
 def fetch_nasa_apod() -> tuple[str, str | None]:
+    cached = _daily_cached("nasa_apod")
+    if cached:
+        return cached
     for attempt in range(3):
         try:
             r = requests.get(
@@ -430,7 +434,9 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
             media_type = d.get("media_type", "image")
             url = d.get("url", "") if media_type == "image" else None
             text = f"🌌 今日宇宙：{title}\n{explanation}..."
-            return text, url
+            result = (text, url)
+            _daily_cache_set("nasa_apod", result)
+            return result
         except requests.exceptions.Timeout:
             if attempt < 2:
                 import time
@@ -508,6 +514,33 @@ def _ninja(path: str, **kwargs):
 
 _TRANSLATE_PENDING: dict = {}
 _QUIZ_STATE: dict = {}  # group_id -> {question, answer}
+
+# ─── 短期對話記憶 ──────────────────────────────────────────
+_CHAT_MEMORY: deque = deque(maxlen=20)  # (nickname, text) tuples, rolling window
+
+def _remember(nickname: str, text: str):
+    _CHAT_MEMORY.append((nickname, text))
+
+def _get_recent_context(n: int = 8) -> str:
+    recent = list(_CHAT_MEMORY)[-n:]
+    if not recent:
+        return ""
+    return "\n".join(f"{nick}：{msg}" for nick, msg in recent)
+
+# ─── 當日 Cache ────────────────────────────────────────────
+_DAILY_CACHE: dict = {}  # (key, date_str) -> result
+
+def _daily_cached(key: str):
+    date_str = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+    return _DAILY_CACHE.get((key, date_str))
+
+def _daily_cache_set(key: str, value):
+    date_str = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+    _DAILY_CACHE[(key, date_str)] = value
+    # 清掉昨天的 key
+    for k in list(_DAILY_CACHE.keys()):
+        if k[1] != date_str:
+            del _DAILY_CACHE[k]
 
 _LANG_MAP = {
     "日文": "ja", "日語": "ja",
@@ -596,11 +629,11 @@ def fetch_spotify_track(query: str) -> str:
     if d is _QUOTA:
         return _QUOTA_MSG
     if not d:
-        return f"🎵 找不到「{query}」😢"
+        return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」😢"
     try:
         items = d.get("tracks", {}).get("items", [])
         if not items:
-            return f"🎵 找不到「{query}」相關的歌"
+            return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」相關的歌"
         lines = ["🎵 找到以下歌曲：\n"]
         for t in items[:3]:
             data = t.get("data", {})
@@ -611,7 +644,7 @@ def fetch_spotify_track(query: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         print(f"[spotify] {e}")
-        return f"🎵 找不到「{query}」😢"
+        return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」😢"
 
 
 # ─── Movies ──────────────────────────────────────────────
@@ -621,11 +654,11 @@ def fetch_imdb(title: str) -> str:
     if d is _QUOTA:
         return _QUOTA_MSG
     if not d:
-        return f"🎬 查不到「{title}」😢"
+        return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 查不到「{title}」😢"
     try:
         results = d.get("results", [])
         if not results:
-            return f"🎬 找不到「{title}」"
+            return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 找不到「{title}」"
         m = results[0]
         year = m.get("year", "")
         rating = m.get("starRating", {}).get("ratingValue", "")
@@ -636,7 +669,7 @@ def fetch_imdb(title: str) -> str:
         )
     except Exception as e:
         print(f"[imdb] {e}")
-        return f"🎬 查不到「{title}」😢"
+        return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 查不到「{title}」😢"
 
 
 def fetch_movie_quote() -> str:
@@ -665,24 +698,27 @@ def fetch_streaming(title: str) -> str:
             break
     if d is _QUOTA:
         return _QUOTA_MSG
+    _gemini_streaming = lambda: call_gemini(
+        f"「{title}」這部電影/劇現在在哪些平台可以看？列出平台名稱，繁體中文回答，格式：🍿《{title}》可在：• Netflix • Disney+ 等"
+    ) or f"🍿 找不到「{title}」的串流資訊"
     if not d:
-        return f"🍿 找不到「{title}」的串流資訊"
+        return _gemini_streaming()
     try:
         items = d if isinstance(d, list) else [d]
         if not items:
-            return f"🍿「{title}」目前沒有串流上架"
+            return _gemini_streaming()
         show = items[0]
         title_show = show.get("title", title)
         services = show.get("streamingInfo", {})
         if not services:
-            return f"🍿《{title_show}》目前沒有串流上架"
+            return _gemini_streaming()
         lines = [f"🍿《{title_show}》可在："]
         for svc in list(services.keys())[:5]:
             lines.append(f"  • {svc.capitalize()}")
         return "\n".join(lines)
     except Exception as e:
         print(f"[streaming] {e}")
-        return "🍿 查詢失敗，待會再試 😢"
+        return _gemini_streaming()
 
 
 # ─── Exercise ────────────────────────────────────────────
@@ -1030,6 +1066,9 @@ def fetch_calories_burned(activity: str, duration_min: int = 30) -> str:
 
 
 def fetch_gold_price() -> str:
+    cached = _daily_cached("gold_price")
+    if cached:
+        return cached
     d = _rapid("get", "gold-price-live.p.rapidapi.com", "/get_metal_prices")
     if d is _QUOTA:
         return _QUOTA_MSG
@@ -1050,7 +1089,9 @@ def fetch_gold_price() -> str:
             pass
         if silver:
             lines.append(f"白銀：${silver} USD/盎司")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        _daily_cache_set("gold_price", result)
+        return result
     except Exception as e:
         print(f"[gold] {e}")
         return "🪙 金價查詢失敗"
@@ -1682,15 +1723,29 @@ def fetch_horoscope_for_sign(sign_zh: str) -> str:
 def fetch_horoscope(text) -> str:
     sign_zh = next((k for k in _ZODIAC if k in text), None)
     if not sign_zh:
+        cache_key = "horoscope_all"
+        cached = _daily_cached(cache_key)
+        if cached:
+            return cached
         # 優先用 sheet，沒有就用 hardcoded 預設
         members = get_all_zodiacs() or [(None, nick, zodiac + "座") for nick, zodiac in _MEMBER_ZODIACS.items()]
         if members:
             today = datetime.now(TW_TZ).strftime("%-m/%-d")
+            results = [None] * len(members)
+            def _fetch_one(i, zodiac):
+                results[i] = fetch_horoscope_for_sign(zodiac)
+            threads = [threading.Thread(target=_fetch_one, args=(i, z), daemon=True)
+                       for i, (_, _, z) in enumerate(members)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=15)
             lines = [f"🔮 今日運勢（{today}）\n"]
-            for _, nick, zodiac in members:
-                result = fetch_horoscope_for_sign(zodiac)
-                lines.append(f"【{nick}】{result}")
-            return "\n\n".join(lines)
+            for i, (_, nick, _) in enumerate(members):
+                lines.append(f"【{nick}】{results[i] or '查詢失敗'}")
+            output = "\n\n".join(lines)
+            _daily_cache_set(cache_key, output)
+            return output
         signs = " / ".join(_ZODIAC.keys())
         return (f"🔮 還沒有人綁定星座！\n"
                 f"輸入「我是天蠍」綁定你的星座\n\n"
@@ -1859,8 +1914,13 @@ def handle_japanese_question(text):
 def handle_mention(text, member=None):
     group_mems = get_memories(days=14)
     personal_mems = get_personal_memories(member, days=14) if member else []
+    recent_chat = _get_recent_context(8)
 
     context = ""
+    if recent_chat:
+        context += "【最近聊天記錄】\n"
+        context += recent_chat
+        context += "\n\n"
     if group_mems:
         context += "【群組近況】\n"
         context += "\n".join(f"[{d}] {c}" for d, c in group_mems)
@@ -1875,7 +1935,7 @@ def handle_mention(text, member=None):
         f"{context}"
         f"{'傳訊息的是 ' + member + '，' if member else ''}"
         f"他說：「{text}」\n"
-        f"請結合你對這個群組和這個人的了解，用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
+        f"請結合上面的對話脈絡和你對這個群組的了解，用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
         f"不要加『大家好』或自我介紹。"
     )
 
@@ -2097,6 +2157,7 @@ def handle_message(event):
 
     with ApiClient(configuration) as api_client:
         member_label = get_member_label(api_client, group_id, user_id)
+        _remember(member_label, text)
         if _should_log(text):
             threading.Thread(
                 target=log_chat_message, args=(member_label, text), daemon=True
@@ -2818,11 +2879,21 @@ def send_morning_greeting():
     weekday = weekdays[today.weekday()]
     date_str = today.strftime(f"%-m月%-d日 {weekday}")
 
+    # 取台北天氣
+    weather_info = ""
+    try:
+        r = requests.get("https://wttr.in/台北?format=%C+%t+%h&lang=zh&m", timeout=6)
+        weather_info = f"天氣：{r.text.strip()}"
+    except Exception:
+        pass
+
     msg = call_gemini(
-        f"今天是{date_str}，幫我寫一則給朋友群的早安問候，"
-        "輕鬆活潑、100字以內、繁體中文，"
-        "可以加上今日小提醒或鼓勵，結尾可以有一個 emoji"
-    ) or f"☀️ 早安！今天是{date_str}，新的一天開始了，加油！"
+        f"今天是{date_str}。{weather_info}\n"
+        "幫我寫一則給朋友群的早安問候，"
+        "輕鬆活潑、120字以內、繁體中文，"
+        "加入天氣提醒（如果天氣資訊有提供），可以加上今日小建議或鼓勵話語。"
+        "結尾加一個 emoji。不要加大家好。"
+    ) or f"☀️ 早安！今天是{date_str}，{weather_info or '新的一天開始了'}，加油！"
 
     push_to_group(msg)
     print(f"[morning] sent at {today.strftime('%H:%M')}")
