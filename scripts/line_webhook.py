@@ -135,13 +135,16 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
         )
         if r.status_code == 200:
             d = r.json()
-            if isinstance(d, list) and len(d) > 0 and d[0]:
-                return d[0]
             if isinstance(d, dict):
+                txts = d.get("translatedTexts")
+                if txts and isinstance(txts, list) and len(txts) > 0 and txts[0]:
+                    return txts[0]
                 for k in ("translations", "translated_texts", "text", "result"):
                     v = d.get(k)
                     if v and isinstance(v, list) and len(v) > 0:
                         return v[0]
+            if isinstance(d, list) and len(d) > 0 and d[0]:
+                return d[0]
     except Exception:
         pass
     # 2. 嘗試 Just Translated
