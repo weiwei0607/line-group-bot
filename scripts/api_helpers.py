@@ -32,6 +32,24 @@ from goal_tracker import (
 )
 
 from config import *
+
+# Re-export weather/horoscope functions so existing imports keep working
+from weather import (
+    fetch_cat_image, fetch_dog_image, fetch_fox_image,
+    fetch_shiba_image, fetch_animal_image, fetch_nasa_apod,
+    fetch_random_pokemon, fetch_advice, handle_joke,
+    handle_fun_fact, fetch_cocktail, fetch_random_meal,
+    fetch_exercise, fetch_anime_quote, fetch_trump_quote,
+    fetch_meme, fetch_chuck_norris, fetch_quotable,
+    fetch_trivia, fetch_number_fact, fetch_astronomy_fact,
+    fetch_gold_price, fetch_news, fetch_random_activity,
+    fetch_daily_japanese, fetch_daily_kanji, fetch_daily_spanish,
+    fetch_movie_quote, get_weather_v2, handle_who_pays,
+    handle_draw_lots, handle_pairing, handle_dice, handle_rps,
+    handle_countdown, handle_fortune, fetch_waifu,
+    _parse_date_offset, send_morning_greeting,
+)
+from horoscope import fetch_horoscope
 from line_push import push_messages, push_text
 
 
