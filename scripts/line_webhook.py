@@ -5,7 +5,7 @@ import random
 import threading
 import requests
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from goal_tracker import TW_TZ
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
@@ -204,6 +204,150 @@ def get_member_label(api_client, group_id, user_id):
 
 TW_CITIES = ["台北", "新北", "桃園", "台中", "台南", "高雄",
              "基隆", "花蓮", "台東", "宜蘭", "嘉義", "新竹"]
+
+
+_WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
+_OM_WMO = {
+    0: "☀️ 晴天", 1: "🌤 大致晴", 2: "⛅️ 部分多雲", 3: "☁️ 陰天",
+    45: "🌫 有霧", 48: "🌫 有霧",
+    51: "🌦 毛毛雨", 53: "🌦 毛毛雨", 55: "🌧 小雨",
+    61: "🌧 小雨", 63: "🌧 中雨", 65: "🌧 大雨",
+    71: "🌨 小雪", 73: "🌨 中雪", 75: "❄️ 大雪",
+    80: "🌦 陣雨", 81: "🌧 陣雨", 82: "⛈ 大陣雨",
+    95: "⛈ 雷雨", 96: "⛈ 雷雨夾冰雹", 99: "⛈ 雷雨夾冰雹",
+}
+
+
+def _parse_date_offset(text: str) -> tuple[int, str] | None:
+    """從中文文字解析日期偏移，回傳 (offset_days, 描述)"""
+    text = text.replace(" ", "").replace("?", "").replace("？", "")
+    # 今天
+    if re.search(r"^(今天|今日|現在)", text) or text in ["今天", "今日"]:
+        return (0, "今天")
+    # 明天
+    if re.search(r"^(明天|明日)", text) or text in ["明天", "明日"]:
+        return (1, "明天")
+    # 後天
+    if re.search(r"^(後天)", text) or text in ["後天"]:
+        return (2, "後天")
+    # 大後天
+    if re.search(r"^(大後天)", text) or text in ["大後天"]:
+        return (3, "大後天")
+    # 星期/週/禮拜/周
+    weekday_map = {
+        "一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5,
+        "日": 6, "天": 6,
+        "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6,
+    }
+    m = re.search(r"(下?[星期週禮礼拜周])([一二三四五六日天1234567])", text)
+    if m:
+        prefix = m.group(1)
+        day_char = m.group(2)
+        target = weekday_map.get(day_char)
+        if target is not None:
+            today = datetime.now().weekday()
+            diff = (target - today) % 7
+            is_next = prefix.startswith("下")
+            if is_next:
+                offset = diff + 7
+            else:
+                offset = diff
+            name = _WEEKDAY_NAMES[target]
+            desc = f"{'下週' if is_next else '本週'}星期{name}"
+            return (offset, desc)
+    return None
+
+
+def _get_om_forecast():
+    """Open-Meteo 7天預報（台北座標）"""
+    try:
+        r = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": 25.04, "longitude": 121.53,
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
+                "timezone": "Asia/Taipei", "forecast_days": 7,
+            },
+            timeout=10,
+        )
+        d = r.json()["daily"]
+        forecast = []
+        for i in range(7):
+            code = int(d.get("weathercode", [0]*7)[i])
+            forecast.append({
+                "condition": _OM_WMO.get(code, "天氣不明"),
+                "temp_max": round(d["temperature_2m_max"][i]),
+                "temp_min": round(d["temperature_2m_min"][i]),
+                "rain_prob": round(d["precipitation_probability_max"][i]),
+            })
+        return forecast
+    except Exception:
+        return None
+
+
+def _weather_advice(condition: str, rain_prob: int, temp_max: int) -> str:
+    advice = []
+    if rain_prob >= 60:
+        advice.append("☔ 記得帶傘！")
+    elif rain_prob >= 30:
+        advice.append("🌂 可能會下雨，建議帶傘")
+    if "晴" in condition and temp_max >= 30:
+        advice.append("🧴 天氣炎熱，記得擦防曬")
+    elif "晴" in condition and temp_max >= 28:
+        advice.append("🌞 天氣不錯，注意防曬")
+    if temp_max <= 18:
+        advice.append("🧥 氣溫較低，記得穿暖")
+    return "\n".join(advice) if advice else ""
+
+
+def _format_om_weather(offset: int, desc: str) -> str:
+    """Open-Meteo 格式化指定日期天氣"""
+    forecast = _get_om_forecast()
+    if not forecast:
+        return "（天氣資料取得失敗）"
+    if offset < 0 or offset >= len(forecast):
+        return "❌ 目前只支援未來7天的天氣預報"
+    day = forecast[offset]
+    target = datetime.now() + timedelta(days=offset)
+    date_str = target.strftime("%m/%d")
+    weekday = _WEEKDAY_NAMES[target.weekday()]
+    advice = _weather_advice(day["condition"], day["rain_prob"], day["temp_max"])
+    lines = [
+        f"{day['condition']}　最高 {day['temp_max']}° / 最低 {day['temp_min']}°",
+        f"降雨機率 {day['rain_prob']}%",
+    ]
+    if advice:
+        lines.append(f"\n💡 出門建議：\n{advice}")
+    return f"📅 {date_str}（{weekday}）\n" + "\n".join(lines)
+
+
+def _format_om_rain_check(offset: int, desc: str) -> str:
+    """回答「會不會下雨」"""
+    forecast = _get_om_forecast()
+    if not forecast:
+        return "（天氣資料取得失敗）"
+    if offset < 0 or offset >= len(forecast):
+        return f"❌ {desc} 超出7天預報範圍，目前只能查未來7天喔"
+    day = forecast[offset]
+    target_date = (datetime.now() + timedelta(days=offset)).strftime("%m/%d")
+    rain_prob = day["rain_prob"]
+    if rain_prob >= 70:
+        rain_msg = f"會下雨喔！🌧 降雨機率高達 {rain_prob}%"
+    elif rain_prob >= 40:
+        rain_msg = f"有可能會下雨 🌦 降雨機率 {rain_prob}%"
+    elif rain_prob >= 20:
+        rain_msg = f"有小機率下雨 ☁️ 降雨機率 {rain_prob}%"
+    else:
+        rain_msg = f"應該不會下雨 ☀️ 降雨機率只有 {rain_prob}%"
+    advice = _weather_advice(day["condition"], day["rain_prob"], day["temp_max"])
+    result = (
+        f"📅 {desc}（{target_date}）\n"
+        f"{rain_msg}\n"
+        f"最高 {day['temp_max']}° / 最低 {day['temp_min']}°　{day['condition']}"
+    )
+    if advice:
+        result += f"\n\n💡 出門建議：\n{advice}"
+    return result
 
 
 def get_weather(text):
@@ -725,6 +869,16 @@ def format_owm_weather(city_zh: str = "台北") -> str:
 
 
 def get_weather_v2(text: str) -> str:
+    # 檢查是否有日期關鍵詞
+    date_result = _parse_date_offset(text)
+    if date_result:
+        offset, desc = date_result
+        if offset >= 7:
+            return f"❌ {desc} 超出7天預報範圍，目前只能查未來7天喔"
+        if any(k in text for k in ["下雨", "會不會", "帶傘", "雨"]):
+            return _format_om_rain_check(offset, desc)
+        return f"🌡 {desc}天氣\n\n{_format_om_weather(offset, desc)}"
+    # 無日期，維持原有邏輯
     city = "台北"
     for c in TW_CITIES:
         if c in text:
@@ -2410,6 +2564,7 @@ def handle_message(event):
                 "摘要 [長文]\n"
                 "\n🔧 實用\n"
                 "匯率 / 天氣 [城市]\n"
+                "[日期]天氣 / [日期]會下雨嗎 — 今天/明天/後天/星期三/下週五\n"
                 "倒數 6/15\n"
                 "QR [網址或文字]\n"
                 "縮網址 [URL]\n"
@@ -2671,7 +2826,12 @@ def handle_message(event):
         elif re.search(r'匯率|美金|日幣|人民幣|換錢|外幣', text):
             reply_text = get_exchange_rate(text)
 
-        elif re.search(r'天氣', text):
+        # ── 天氣 ──
+        weather_triggers = ["天氣", "下雨", "會下雨", "帶傘", "氣溫", "溫度", "適合出門", "出門嗎"]
+        has_weather_word = any(k in text for k in weather_triggers)
+        date_result = _parse_date_offset(text)
+        is_weather_query = has_weather_word or (date_result and ("嗎" in text or "?" in text or "？" in text))
+        if is_weather_query:
             reply_text = get_weather_v2(text)
 
         # ── 翻譯 ──
