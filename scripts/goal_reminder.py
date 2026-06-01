@@ -16,8 +16,7 @@ from goal_tracker import (
     get_user_id_by_nickname,
 )
 from utils import send_line_message
-
-MEMBERS = ["太后", "毛毛", "二毛"]
+from config import MEMBERS
 
 
 def build_daily_checkin_reminder(cycle_id, day, total):

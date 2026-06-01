@@ -5,6 +5,7 @@ import requests
 from collections import deque
 from datetime import datetime, timedelta
 from goal_tracker import TW_TZ
+from config import MEMBERS
 
 # ─── Weather ──────────────────────────────────────────────
 

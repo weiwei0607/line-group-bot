@@ -190,7 +190,23 @@ def handle_exception(e):
     traceback.print_exc()
 
 
+def _is_scheduler_primary() -> bool:
+    """Use a localhost port bind to ensure only one process starts the scheduler."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 50000))
+        return True
+    except socket.error:
+        return False
+    finally:
+        s.close()
+
+
 def _start_scheduler():
+    if not _is_scheduler_primary():
+        logging.info("Scheduler skipped: another process already holds the lock")
+        return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger

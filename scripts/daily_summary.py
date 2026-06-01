@@ -7,8 +7,7 @@
 
 from utils import call_gemini
 from goal_tracker import get_today_chat_logs, add_memory, add_personal_memory, _now
-
-MEMBERS = ["太后", "毛毛", "二毛"]
+from config import MEMBERS
 
 
 def main():

@@ -507,12 +507,12 @@ def handle_message(event):
             qstate = quiz_get(gid)
             if qstate and "options" in qstate:
                 chosen = text.strip().upper()
-                if chosen == state["correct_letter"]:
+                if chosen == qstate["correct_letter"]:
                     quiz_delete(gid)
                     new_score = add_quiz_score(member_label)
-                    reply_text = f"🎉 答對了！答案是 {state['correct_letter']}. {state['answer']}\n{member_label} 本週答對 {new_score} 題！"
+                    reply_text = f"🎉 答對了！答案是 {qstate['correct_letter']}. {qstate['answer']}\n{member_label} 本週答對 {new_score} 題！"
                 else:
-                    chosen_ans = qvstate["options"].get(chosen, chosen)
+                    chosen_ans = qstate["options"].get(chosen, chosen)
                     reply_text = f"❌ {chosen}. {chosen_ans} 不對喔，再想想！（傳「答案」放棄）"
 
         elif m := re.match(r'^答\s+(.+)$', text):
@@ -524,7 +524,7 @@ def handle_message(event):
                 if correct in user_ans or user_ans in correct:
                     quiz_delete(gid)
                     new_score = add_quiz_score(member_label)
-                    reply_text = f"🎉 答對了！答案是：{state['answer']}\n{member_label} 本週答對 {new_score} 題！"
+                    reply_text = f"🎉 答對了！答案是：{qstate['answer']}\n{member_label} 本週答對 {new_score} 題！"
                 else:
                     reply_text = "❌ 不對喔，再想想！（傳「答案」放棄）"
 
@@ -741,9 +741,9 @@ def handle_message(event):
             if vstate:
                 chosen = m.group(1)
                 idx = ord(chosen) - ord("A")
-                if idx < len(qvstate["options"]):
+                if idx < len(vstate["options"]):
                     vstate["votes"][member_label] = chosen
-                    opt_name = qvstate["options"][idx]
+                    opt_name = vstate["options"][idx]
                     reply_text = f"✅ {member_label} 投了 {chosen}. {opt_name}"
                     # 投票數達到成員數時自動結算
                     if len(vstate["votes"]) >= max(2, len(MEMBERS)):
@@ -751,7 +751,7 @@ def handle_message(event):
                         cnt = Counter(vstate["votes"].values())
                         winner_letter = cnt.most_common(1)[0][0]
                         winner_idx = ord(winner_letter) - ord("A")
-                        winner_name = qvstate["options"][winner_idx]
+                        winner_name = vstate["options"][winner_idx]
                         detail = " / ".join(f"{k}: {v}票" for k, v in sorted(cnt.items()))
                         reply_text += f"\n\n🎉 全員投票完畢！\n結果：{winner_letter}. {winner_name} 勝出\n（{detail}）"
                         vote_delete(gid)
@@ -762,9 +762,9 @@ def handle_message(event):
             if vstate:
                 from collections import Counter
                 cnt = Counter(vstate["votes"].values())
-                lines = [f"📊 {state['question']} 目前票數："]
+                lines = [f"📊 {vstate['question']} 目前票數："]
                 letters = ["A", "B", "C", "D"]
-                for i, opt in enumerate(qvstate["options"]):
+                for i, opt in enumerate(vstate["options"]):
                     letter = letters[i]
                     votes = cnt.get(letter, 0)
                     bar = "█" * votes + "░" * (len(MEMBERS) - votes)

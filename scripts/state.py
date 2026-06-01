@@ -10,7 +10,7 @@ import threading
 import logging
 from datetime import datetime, timedelta
 
-DB_PATH = os.environ.get("STATE_DB_PATH", "/tmp/bot_state.db")
+DB_PATH = os.environ.get("STATE_DB_PATH", "./data/bot_state.db")
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
 _write_lock = threading.Lock()
