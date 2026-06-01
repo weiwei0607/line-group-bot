@@ -1,6 +1,9 @@
 import os
+import logging
 from datetime import datetime, timedelta
 from goal_tracker import TW_TZ
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -36,6 +39,8 @@ from api_helpers import *
 
 # Import command handlers from commands module
 from commands import handle_message, handle_audio, handle_image, handle_join
+import logging
+logger = logging.getLogger(__name__)
 
 # Register handlers
 handler.add(MessageEvent, message=TextMessageContent)(handle_message)

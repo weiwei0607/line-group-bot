@@ -5,36 +5,11 @@
 
 import os
 import random
-import requests
 from datetime import datetime, timezone, timedelta
 from goal_tracker import get_last_activity, TW_TZ
+from utils import call_gemini, send_line_message
 
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
-GROUP_ID = os.environ["LINE_GROUP_ID"]
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 SILENCE_HOURS = int(os.environ.get("SILENCE_HOURS", "48"))
-
-
-def call_gemini(prompt):
-    if not GEMINI_API_KEY:
-        return None
-    try:
-        url = (f"https://generativelanguage.googleapis.com/v1beta/"
-               f"models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
-        resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=12)
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception:
-        return None
-
-
-def send_line_message(text):
-    requests.post(
-        "https://api.line.me/v2/bot/message/push",
-        headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
-                 "Content-Type": "application/json"},
-        json={"to": GROUP_ID, "messages": [{"type": "text", "text": text}]},
-        timeout=10,
-    )
 
 
 FALLBACK_MESSAGES = [

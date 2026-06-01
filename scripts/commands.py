@@ -291,6 +291,25 @@ def handle_message(event):
                     lines.append(streak_line)
                 reply_text = "\n".join(lines)
 
+        # ── Simple dispatch (fast path for stateless commands) ──
+        from dispatch import try_dispatch
+        disp_text, disp_img = try_dispatch(text)
+        if disp_text is not None:
+            if disp_img:
+                with ApiClient(configuration) as api_client:
+                    MessagingApi(api_client).reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[
+                                TextMessage(text=disp_text[:4900]),
+                                ImageMessage(original_content_url=disp_img, preview_image_url=disp_img),
+                            ],
+                        )
+                    )
+            else:
+                reply(reply_token, disp_text)
+            return
+
         # ── 趣味功能 ──
         elif re.search(r'今日運勢|運勢|占卜', text):
             _async_push(reply_token, "🔮 占星師施法中，請稍候...", fetch_horoscope, text)
@@ -713,8 +732,8 @@ def handle_message(event):
                     state["votes"][member_label] = chosen
                     opt_name = state["options"][idx]
                     reply_text = f"✅ {member_label} 投了 {chosen}. {opt_name}"
-                    # 投票數達到選項數量時自動結算
-                    if len(state["votes"]) >= max(2, len(state["options"])):
+                    # 投票數達到成員數時自動結算
+                    if len(state["votes"]) >= max(2, len(MEMBERS)):
                         from collections import Counter
                         cnt = Counter(state["votes"].values())
                         winner_letter = cnt.most_common(1)[0][0]

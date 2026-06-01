@@ -32,16 +32,7 @@ from goal_tracker import (
 )
 
 from config import *
-
-# LINE messaging configuration (local copy to avoid circular imports)
-_configuration = None
-
-def _get_configuration():
-    global _configuration
-    if _configuration is None:
-        token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-        _configuration = Configuration(access_token=token)
-    return _configuration
+from line_push import push_messages, push_text
 
 
 
@@ -55,19 +46,9 @@ def _should_log(text: str) -> bool:
     return True
 
 
-# ─── Gemini ───────────────────────────────────────────────
-
-def call_gemini(prompt):
-    if not GEMINI_API_KEY:
-        return None
-    try:
-        url = (f"https://generativelanguage.googleapis.com/v1beta/"
-               f"models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
-        resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=12)
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception as _exc:
-        print(f'[warn] {_exc}')
-        return None
+from utils import call_gemini, send_telegram_alert
+import logging
+logger = logging.getLogger(__name__)
 
 
 # ─── 智慧翻譯：RapidAPI 為主，Gemini 為 fallback ───────────
@@ -101,7 +82,7 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
             if isinstance(d, list) and len(d) > 0 and d[0]:
                 return d[0]
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     # 2. 嘗試 Just Translated（目前 Yandex v1 回 410，保留待修復）
     try:
@@ -122,7 +103,7 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
             if isinstance(d, str):
                 return d
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     # 3. Fallback 到 Gemini
     result = call_gemini(f"翻成繁體中文，只給翻譯結果：{text}")
@@ -192,7 +173,7 @@ def _parse_date_offset(text: str) -> tuple[int, str] | None:
         day_char = m.group(2)
         target = weekday_map.get(day_char)
         if target is not None:
-            today = datetime.now().weekday()
+            today = datetime.now(TW_TZ).weekday()
             diff = (target - today) % 7
             is_next = prefix.startswith("下")
             if is_next:
@@ -229,7 +210,7 @@ def _get_om_forecast():
             })
         return forecast
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -256,7 +237,7 @@ def _format_om_weather(offset: int, desc: str) -> str:
     if offset < 0 or offset >= len(forecast):
         return "❌ 目前只支援未來7天的天氣預報"
     day = forecast[offset]
-    target = datetime.now() + timedelta(days=offset)
+    target = datetime.now(TW_TZ) + timedelta(days=offset)
     date_str = target.strftime("%m/%d")
     weekday = _WEEKDAY_NAMES[target.weekday()]
     advice = _weather_advice(day["condition"], day["rain_prob"], day["temp_max"])
@@ -277,7 +258,7 @@ def _format_om_rain_check(offset: int, desc: str) -> str:
     if offset < 0 or offset >= len(forecast):
         return f"❌ {desc} 超出7天預報範圍，目前只能查未來7天喔"
     day = forecast[offset]
-    target_date = (datetime.now() + timedelta(days=offset)).strftime("%m/%d")
+    target_date = (datetime.now(TW_TZ) + timedelta(days=offset)).strftime("%m/%d")
     rain_prob = day["rain_prob"]
     if rain_prob >= 70:
         rain_msg = f"會下雨喔！🌧 降雨機率高達 {rain_prob}%"
@@ -443,7 +424,7 @@ def fetch_cat_image() -> str | None:
         r = requests.get("https://api.thecatapi.com/v1/images/search", timeout=8)
         return r.json()[0]["url"]
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -453,7 +434,7 @@ def fetch_dog_image() -> str | None:
         url = r.json().get("message", "")
         return url if url.startswith("https") else None
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -501,7 +482,7 @@ def fetch_fox_image() -> str | None:
         r = requests.get("https://randomfox.ca/floof/", timeout=8)
         return r.json().get("image")
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -510,7 +491,7 @@ def fetch_shiba_image() -> str | None:
         r = requests.get("https://dog.ceo/api/breed/shiba/images/random", timeout=8)
         return r.json().get("message")
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -519,7 +500,7 @@ def fetch_animal_image(animal: str) -> str | None:
         r = requests.get(f"https://some-random-api.com/animal/{animal}", timeout=8)
         return r.json().get("image")
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -577,15 +558,15 @@ def _rapid(method: str, host: str, path: str, **kwargs):
                 f"https://{host}{path}", headers=headers, timeout=10, **kwargs
             )
             if r.status_code == 429:
-                print(f"[RapidAPI] 429 key {(_rapid_idx+attempt)%n+1}/{n}: {host}{path}")
+                logger.warning("[RapidAPI] 429 key %s/%s: %s%s", (_rapid_idx+attempt)%n+1, n, host, path)
                 continue  # try next key
             r.raise_for_status()
             _rapid_idx = (_rapid_idx + attempt + 1) % n  # advance after success
             return r.json()
         except Exception as e:
-            print(f"[RapidAPI] {host}{path} → {e}")
+            logger.warning("[RapidAPI] %s", "host}{path} → {e")
             return None
-    print(f"[RapidAPI] all {n} keys quota exceeded: {host}{path}")
+    logger.warning("[RapidAPI] all %s keys quota exceeded: %s%s", n, host, path)
     return _QUOTA
 
 
@@ -604,13 +585,13 @@ def _ninja(path: str, **kwargs):
                 **kwargs,
             )
             if r.status_code == 429:
-                print(f"[api-ninjas] 429 key {(_ninja_idx+attempt)%n+1}/{n}: {path}")
+                logger.warning("[api-ninjas] 429 key %s/%s: %s", (_ninja_idx+attempt)%n+1, n, path)
                 continue  # try next key
             r.raise_for_status()
             _ninja_idx = (_ninja_idx + attempt + 1) % n  # advance after success
             return r.json()
         except Exception as e:
-            print(f"[api-ninjas] {path} → {e}")
+            logger.warning("[api-ninjas] %s", "path} → {e")
             return None
     # all ninja keys exhausted, fall back to RapidAPI
     return _rapid("get", "api-ninjas.p.rapidapi.com", path, **kwargs)
@@ -650,40 +631,17 @@ def _daily_cache_set(key: str, value):
             del _DAILY_CACHE[k]
 
 
-# ─── Telegram 告警 ────────────────────────────────────────
-
-def send_telegram_alert(msg: str):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": f"🚨 小棉襖 Bot 告警\n{msg}"[:4000]},
-            timeout=5,
-        )
-    except Exception as _exc:
-        print(f'[warn] {_exc}')
-        pass
-
-
 # ─── Async reply → push helper ────────────────────────────
 
-def _push_messages(msgs: list):
-    if not LINE_GROUP_ID or not msgs:
-        return
-    token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-    if not token:
-        return
-    try:
-        requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers={"Authorization": f"Bearer {token}",
-                     "Content-Type": "application/json"},
-            json={"to": LINE_GROUP_ID, "messages": msgs},
-            timeout=30,
-        )
-    except Exception as e:
-        print(f"[push_msgs] {e}")
+# LINE messaging configuration (local copy for _async_push placeholder reply)
+_configuration = None
+
+def _get_configuration():
+    global _configuration
+    if _configuration is None:
+        token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+        _configuration = Configuration(access_token=token)
+    return _configuration
 
 
 def _async_push(reply_token: str, placeholder: str, fn, *args):
@@ -708,34 +666,18 @@ def _async_push(reply_token: str, placeholder: str, fn, *args):
                 msgs.append({"type": "image",
                              "originalContentUrl": img_r,
                              "previewImageUrl": img_r})
-            _push_messages(msgs)
+            push_messages(LINE_GROUP_ID, msgs)
         except Exception as e:
-            print(f"[async_push] {e}")
+            logger.warning("async_push error: %s", e)
             send_telegram_alert(f"async_push 失敗：{e}")
     threading.Thread(target=_run, daemon=True).start()
 
 
 def push_to_group(text: str):
-    if not LINE_GROUP_ID:
-        return
-    try:
-        cfg = _get_configuration()
-        with ApiClient(cfg) as api_client:
-            MessagingApi(api_client).push_message(
-                to=LINE_GROUP_ID,
-                messages=[{"type": "text", "text": text}],
-            )
-    except Exception as e:
-        print(f"[push_to_group] {e}")
+    push_text(LINE_GROUP_ID, text)
 
 
-def send_morning_greeting():
-    today = datetime.now(TW_TZ)
-    weekdays = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
-    weekday = weekdays[today.weekday()]
-    date_str = today.strftime(f"%-m月%-d日 {weekday}")
-
-    weather_info = ""
+def _fetch_weather_for_greeting():
     try:
         d = get_owm_weather("台北")
         if d:
@@ -743,16 +685,36 @@ def send_morning_greeting():
             temp = round(d["main"]["temp"])
             humidity = d["main"]["humidity"]
             rain = d.get("rain", {}).get("1h", 0) or d.get("rain", {}).get("3h", 0)
-            weather_info = f"台北天氣：{desc} {temp}°C 濕度{humidity}%"
+            info = f"台北天氣：{desc} {temp}°C 濕度{humidity}%"
             if rain:
-                weather_info += f" 有雨{rain}mm，記得帶傘"
+                info += f" 有雨{rain}mm，記得帶傘"
+            return info
     except Exception as e:
-        print(f"[warn] {e}")
+        logger.warning("API error: %s", e)
+    return ""
 
-    birthday_nicks = get_today_birthdays()
-    if not birthday_nicks:
-        today_mmdd = today.strftime("%m-%d")
-        birthday_nicks = [nick for nick, bd in _MEMBER_BIRTHDAYS.items() if bd == today_mmdd]
+
+def _fetch_birthdays_for_greeting(today_mmdd: str):
+    nicks = get_today_birthdays()
+    if not nicks:
+        nicks = [nick for nick, bd in _MEMBER_BIRTHDAYS.items() if bd == today_mmdd]
+    return nicks
+
+
+def send_morning_greeting():
+    today = datetime.now(TW_TZ)
+    weekdays = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
+    weekday = weekdays[today.weekday()]
+    date_str = today.strftime(f"%-m月%-d日 {weekday}")
+    today_mmdd = today.strftime("%m-%d")
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_weather = ex.submit(_fetch_weather_for_greeting)
+        f_bdays = ex.submit(_fetch_birthdays_for_greeting, today_mmdd)
+        weather_info = f_weather.result()
+        birthday_nicks = f_bdays.result()
+
     birthday_str = f"今天是 {'、'.join(birthday_nicks)} 的生日！" if birthday_nicks else ""
 
     holiday_hint = call_gemini(
@@ -771,7 +733,7 @@ def send_morning_greeting():
     ) or f"☀️ 早安！今天是{date_str}，{weather_info or '新的一天開始了'}！{birthday_str}"
 
     push_to_group(msg)
-    print(f"[morning] sent at {today.strftime('%H:%M')}")
+    logger.info("Morning greeting sent at %s", today.strftime("%H:%M"))
 
 
 _LANG_MAP = {
@@ -857,7 +819,7 @@ def get_owm_weather(city_zh: str = "台北") -> dict | None:
         if r.status_code == 200:
             return r.json()
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return None
 
@@ -926,7 +888,7 @@ def fetch_spotify_track(query: str) -> str:
             lines.append(f"• {name} — {artist}")
         return "\n".join(lines)
     except Exception as e:
-        print(f"[spotify] {e}")
+        logger.warning("[spotify] %s", "e")
         return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」😢"
 
 
@@ -951,7 +913,7 @@ def fetch_imdb(title: str) -> str:
             f"⭐ {rating}/10" if rating else f"🎬 {title_str}（{year}）"
         )
     except Exception as e:
-        print(f"[imdb] {e}")
+        logger.warning("[imdb] %s", "e")
         return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 查不到「{title}」😢"
 
 
@@ -1000,7 +962,7 @@ def fetch_streaming(title: str) -> str:
             lines.append(f"  • {svc.capitalize()}")
         return "\n".join(lines)
     except Exception as e:
-        print(f"[streaming] {e}")
+        logger.warning("[streaming] %s", "e")
         return _gemini_streaming()
 
 
@@ -1126,7 +1088,7 @@ def fetch_anime_quote() -> str:
             if result:
                 return result
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
 
     # Fallback: Gemini
@@ -1171,7 +1133,7 @@ def fetch_trump_quote() -> str:
         if quote:
             return f"🦅 川普語錄\n「{quote}」"
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return "🦅 川普去打高爾夫了，待會再問"
 
@@ -1197,7 +1159,7 @@ def fetch_superhero(name: str) -> str:
             f"智力 {stats.get('intelligence', '?')}　能量 {stats.get('power', '?')}"
         )
     except Exception as e:
-        print(f"[superhero] {e}")
+        logger.warning("[superhero] %s", "e")
         return f"🦸 查不到「{name}」，試試英文名字"
 
 
@@ -1214,7 +1176,7 @@ def fetch_meme() -> tuple:
             if url and url.startswith("http"):
                 return (f"😂 {title}" if title else "😂 今日梗圖"), url
         except Exception as _exc:
-            print(f'[warn] {_exc}')
+            logger.warning("API error: %s", _exc)
             pass
     return "😂 梗圖機壞了，待會再試", None
 
@@ -1228,7 +1190,7 @@ def fetch_chuck_norris() -> str:
         if joke:
             return f"💪 查克諾里斯冷知識\n{joke}"
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return "💪 查克諾里斯太強了，API 被他打掛了"
 
@@ -1373,7 +1335,7 @@ def fetch_gold_price() -> str:
             rate = r2.json()["rates"].get("TWD", 31)
             lines.append(f"約 NT$ {round(float(gold) * rate):,} 元/盎司")
         except Exception as _exc:
-            print(f'[warn] {_exc}')
+            logger.warning("API error: %s", _exc)
             pass
         if silver:
             lines.append(f"白銀：${silver} USD/盎司")
@@ -1381,7 +1343,7 @@ def fetch_gold_price() -> str:
         _daily_cache_set("gold_price", result)
         return result
     except Exception as e:
-        print(f"[gold] {e}")
+        logger.warning("[gold] %s", "e")
         return "🪙 金價查詢失敗"
 
 
@@ -1393,7 +1355,7 @@ def fetch_number_fact() -> str:
             zh = smart_translate(text)
             return f"🔢 {zh}"
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return call_gemini("給我一個關於數字的有趣冷知識，用繁體中文") or "數字冷知識暫時失靈"
 
@@ -1485,7 +1447,7 @@ def fetch_waifu() -> tuple:
         if items:
             return "🌸 動漫圖來了！", items[0].get("url")
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return "🌸 動漫圖暫時抓不到", None
 
@@ -1499,7 +1461,7 @@ def fetch_quotable() -> str:
         if q:
             return f'✨ "{q}"\n\n— {a}'
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return ""
 
@@ -1545,7 +1507,7 @@ def _jisho_lookup(word: str) -> dict | None:
             "common": entry.get("is_common", False),
         }
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -1564,7 +1526,7 @@ def _kanji_lookup(char: str) -> dict | None:
             "strokes": d.get("stroke_count"),
         }
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -1669,7 +1631,7 @@ def fetch_spanish(word: str) -> str:
                     ) or "\n".join(defs[:2])
                     return f"🇪🇸 {entry.get('word', word)}{phonetic}\n\n{defs_zh}"
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return call_gemini(
         f"用繁體中文解釋西班牙文單字「{word}」的意思、詞性和一個例句"
@@ -1736,7 +1698,7 @@ def shorten_url(url: str) -> str:
         if short.startswith("http"):
             return f"🔗 縮短後：{short}"
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return "短網址產生失敗 😢"
 
@@ -1763,7 +1725,7 @@ def fetch_youtube(query: str) -> str:
                 lines.append(f"• {title}\n  {channel}\n  https://youtu.be/{vid_id}")
         return "\n".join(lines)
     except Exception as e:
-        print(f"[youtube] {e}")
+        logger.warning("[youtube] %s", "e")
         return f"🎬 找不到「{query}」相關影片"
 
 
@@ -1802,7 +1764,7 @@ def match_zodiac(sign1: str, sign2: str) -> str:
                     desc_zh = smart_translate(desc)
                     return f"💕 {s1}座 × {s2}座\n\n配對指數：{score}\n\n{desc_zh}"
             except Exception as _exc:
-                print(f'[warn] {_exc}')
+                logger.warning("API error: %s", _exc)
                 pass
     return call_gemini(
         f"分析{s1}座和{s2}座的配對，包含：配對指數（%）、優點、挑戰，"
@@ -1823,7 +1785,7 @@ def fetch_news() -> str:
                 lines.append(f"• {a.get('title', '')}")
             return "\n".join(lines)
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     d = _rapid("get", "bing-news-search1.p.rapidapi.com", "/news/search",
                params={"q": "台灣 新聞", "count": "5", "mkt": "zh-TW"})
@@ -1838,7 +1800,7 @@ def fetch_news() -> str:
                     lines.append(f"• {item.get('name', '')}")
                 return "\n".join(lines)
         except Exception as _exc:
-            print(f'[warn] {_exc}')
+            logger.warning("API error: %s", _exc)
             pass
     return call_gemini("給我5則今天台灣的重要新聞頭條，每則一行，用繁體中文") or "新聞暫時無法取得"
 
@@ -1866,7 +1828,7 @@ def shazam_identify(audio_bytes: bytes) -> str:
             if title:
                 return f"🎵 找到了！\n\n《{title}》\n{artist}"
         except Exception as e:
-            print(f"[shazam] parse error: {e}")
+            logger.warning("[shazam] parse error: %s", e)
     return "🎵 聽不出來這首歌，音訊可能太短或品質不夠"
 
 
@@ -1884,7 +1846,7 @@ def remove_background(img_bytes: bytes) -> str | None:
         url = d.get("url") or d.get("result_url") or d.get("output_url")
         return url
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 
@@ -1903,7 +1865,7 @@ def check_nsfw(img_bytes: bytes) -> bool:
                 if float(item.get("probability", 0)) > 0.7:
                     return True
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return False
 
@@ -1982,7 +1944,7 @@ def _fetch_horoscope_aztro(sign_en: str) -> dict | None:
             return None
         return r.json()
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         return None
 
 def _fetch_horoscope_advanced(sign_en: str) -> dict | None:
@@ -2000,7 +1962,7 @@ def _fetch_horoscope_advanced(sign_en: str) -> dict | None:
             d = r.json()
             return {"prediction": d.get("prediction", ""), "source": "Advanced"}
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return None
 
@@ -2024,7 +1986,7 @@ def _fetch_horoscope_basic(sign_en: str) -> dict | None:
                 "source": "Basic",
             }
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return None
 
@@ -2046,7 +2008,7 @@ def _fetch_horoscope_rashifal(sign_en: str) -> dict | None:
             d = r.json()
             return {"prediction": d.get("desc", ""), "source": "Rashifal"}
     except Exception as _exc:
-        print(f'[warn] {_exc}')
+        logger.warning("API error: %s", _exc)
         pass
     return None
 

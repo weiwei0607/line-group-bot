@@ -8,30 +8,15 @@
 """
 
 import os
-import requests
 from datetime import datetime, timedelta, timezone
 from goal_tracker import (
     get_cycle_info, get_checkin_stats, get_goals,
     get_today_checkins, build_summary_text, get_next_cycle_start,
     get_todos_by_date, get_overdue_todos, TW_TZ,
 )
+from utils import send_line_message
 
 MEMBERS = ["太后", "毛毛", "二毛"]
-
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
-GROUP_ID = os.environ["LINE_GROUP_ID"]
-
-
-def send_line_message(text):
-    requests.post(
-        "https://api.line.me/v2/bot/message/push",
-        headers={
-            "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        json={"to": GROUP_ID, "messages": [{"type": "text", "text": text}]},
-        timeout=10,
-    )
 
 
 def build_daily_checkin_reminder(cycle_id, day, total):

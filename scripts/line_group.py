@@ -1,11 +1,9 @@
 import os
-import requests
 import random
 from datetime import datetime, timezone, timedelta
+from utils import call_gemini, send_line_message
 
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 GROUP_ID = os.environ["LINE_GROUP_ID"]
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 now_tw = datetime.now(timezone.utc) + timedelta(hours=8)
 weekday = now_tw.weekday()  # 0=週一, 6=週日
@@ -21,16 +19,6 @@ JP_RESOURCES = [
     ("NHK Easy Japanese", "https://www.nhk.or.jp/lesson/\n→ NHK 官方免費課程，有繁中介面，專為初學者設計"),
     ("Speak Japanese Naturally", "https://youtube.com/@SpeakJapaneseNaturally\n→ 日常生活場景對話，N5/N4 程度，短片易吸收"),
 ]
-
-def call_gemini(prompt):
-    if not GEMINI_API_KEY:
-        return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-        resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=15)
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except:
-        return None
 
 def get_group_message():
     if is_sunday:
@@ -117,17 +105,6 @@ def get_declutter_direction():
     )
     result = call_gemini(prompt)
     return result or f"🧹 今日斷捨離：來整理一下{target}吧！清掉沒用的，讓空間更清爽 ✨"
-
-def send_line_message(text):
-    requests.post(
-        "https://api.line.me/v2/bot/message/push",
-        headers={
-            "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        json={"to": GROUP_ID, "messages": [{"type": "text", "text": text}]},
-        timeout=10,
-    )
 
 # 發送群組互動訊息
 group_msg = get_group_message()

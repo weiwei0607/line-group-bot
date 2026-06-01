@@ -5,24 +5,10 @@
   2. 為每位出現的成員生成個人摘要 → 存入 個人記憶 tab
 """
 
-import os
-import requests
+from utils import call_gemini
 from goal_tracker import get_today_chat_logs, add_memory, add_personal_memory, _now
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MEMBERS = ["太后", "毛毛", "二毛"]
-
-
-def call_gemini(prompt):
-    if not GEMINI_API_KEY:
-        return None
-    try:
-        url = (f"https://generativelanguage.googleapis.com/v1beta/"
-               f"models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
-        resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=15)
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception:
-        return None
 
 
 def main():
