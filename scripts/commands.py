@@ -22,10 +22,8 @@ from utils import send_telegram_alert
 from state import translate_get, translate_delete, remove_bg_get, remove_bg_set, rate_limit_check
 from weather import (
     send_morning_greeting, _parse_date_offset, get_weather_v2,
-    handle_countdown, handle_who_pays, handle_draw_lots, handle_translate,
-    handle_joke, handle_fun_fact,
+    handle_countdown, handle_translate,
 )
-from horoscope import fetch_horoscope
 from dispatch import try_dispatch
 from handlers.goals import (
     handle_set_goals, handle_checkin, handle_view_goals,
@@ -206,6 +204,22 @@ _TEXT_DISPATCH = {
     "最新新聞": lambda: fetch_news(),
 }
 
+_REGEX_DISPATCH = [
+    (re.compile(r"^找歌\s*(.+)$"), lambda match: fetch_spotify_track(match.group(1).strip())),
+    (re.compile(r"^查電影\s*(.+)$"), lambda match: fetch_imdb(match.group(1).strip())),
+    (re.compile(r"^在哪看\s*(.+)$"), lambda match: fetch_streaming(match.group(1).strip())),
+    (re.compile(r"^查超英\s*(.+)$"), lambda match: fetch_superhero(match.group(1).strip())),
+    (re.compile(r"^國家\s*(.+)$"), lambda match: fetch_country(match.group(1).strip())),
+    (re.compile(r"^找書\s*(.+)$"), lambda match: fetch_book(match.group(1).strip())),
+    (re.compile(r"^查日文\s*(.+)$"), lambda match: fetch_jisho(match.group(1).strip())),
+    (re.compile(r"^漢字\s*([^\s])$"), lambda match: fetch_kanji(match.group(1))),
+    (re.compile(r"^查西文\s*(.+)$"), lambda match: fetch_spanish(match.group(1).strip())),
+    (re.compile(r"^熱量\s+(.+)$"), lambda match: fetch_nutrition(match.group(1).strip())),
+    (re.compile(r"^食譜\s+(.+)$"), lambda match: fetch_recipe_by_ingredient(match.group(1).strip())),
+    (re.compile(r"^縮網址\s+(.+)$"), lambda match: shorten_url(match.group(1).strip())),
+]
+
+
 def handle_message(event):
     text = event.message.text.strip()
     reply_token = event.reply_token
@@ -258,10 +272,6 @@ def handle_message(event):
         # ── 指令清單 ──
         if text in ("指令", "說明", "幫助", "help", "功能"):
             reply_text = _HELP_TEXT
-
-        # ── 配額說明 ──
-        elif text in _TEXT_DISPATCH:
-            reply_text = _TEXT_DISPATCH[text]()
 
         # ── 隱藏指令 ──
         elif text == "!groupid":
@@ -422,23 +432,6 @@ def handle_message(event):
                 reply_text = "\n".join(lines)
 
         # ── 趣味功能（fallback for partial matches not caught by dispatch）──
-        elif re.search(r'今日運勢|運勢|占卜', text):
-            _async_push(reply_token, "🔮 占星師施法中，請稍候...", fetch_horoscope, text)
-            return
-
-        elif re.search(r'誰請客|今天誰請|誰買單|今天誰買', text):
-            reply_text = handle_who_pays(text)
-
-        elif re.search(r'^(抽籤|幫我選|幫我決定|選一個)', text):
-            reply_text = handle_draw_lots(text)
-
-        elif re.search(r'^(今日運動|找運動)', text):
-            body_part = None
-            m2 = re.match(r'^找運動\s*(.+)$', text)
-            if m2:
-                body_part = m2.group(1).strip()
-            reply_text = fetch_exercise(body_part)
-
         # ── 待辦 ──
         elif re.match(r'^提醒(我|\s)', text):
             reply_text = handle_add_todo(member_label, text)
@@ -466,38 +459,20 @@ def handle_message(event):
             reply_text = handle_translate(user_id, text)
 
         # ── 找歌 ──
-        elif m := re.match(r'^找歌\s*(.+)$', text):
-            reply_text = fetch_spotify_track(m.group(1).strip())
 
         # ── 查電影 ──
-        elif m := re.match(r'^查電影\s*(.+)$', text):
-            reply_text = fetch_imdb(m.group(1).strip())
 
         # ── 電影台詞 ──
 
         # ── 在哪看 ──
-        elif m := re.match(r'^在哪看\s*(.+)$', text):
-            reply_text = fetch_streaming(m.group(1).strip())
 
         # ── 今日運動 / 找運動 ──
-        elif re.match(r'^(今日運動|找運動)', text):
-            body_part = None
-            m2 = re.match(r'^找運動\s*(.+)$', text)
-            if m2:
-                body_part = m2.group(1).strip()
-            reply_text = fetch_exercise(body_part)
-
         # ── 來一題（A/B/C/D 選擇題）──
         elif (quiz_result := handle_quiz(text, group_id, member_label)) is not None:
             reply_text = quiz_result
 
 
         # ── 今日調酒 ──
-        elif re.match(r'^今日調酒', text):
-            m2 = re.match(r'^今日調酒\s*(.+)$', text)
-            name = m2.group(1).strip() if m2 else None
-            reply_text = fetch_cocktail(name)
-
         # ── 動漫語錄 ──
 
         # ── 我好無聊 ──
@@ -505,8 +480,6 @@ def handle_message(event):
         # ── 川普語錄 ──
 
         # ── 查超英 ──
-        elif m := re.match(r'^查超英\s*(.+)$', text):
-            reply_text = fetch_superhero(m.group(1).strip())
 
         # ── 隨機梗圖 ──
         elif text == "隨機梗圖":
@@ -521,12 +494,8 @@ def handle_message(event):
             reply_text = fetch_tldr(m.group(1).strip())
 
         # ── 國家資訊 ──
-        elif m := re.match(r'^國家\s*(.+)$', text):
-            reply_text = fetch_country(m.group(1).strip())
 
         # ── 找書 ──
-        elif m := re.match(r'^找書\s*(.+)$', text):
-            reply_text = fetch_book(m.group(1).strip())
 
         # ── 動漫圖 ──
         elif text == "動漫圖":
@@ -546,17 +515,11 @@ def handle_message(event):
                 reply_text = result
 
         # ── 日文字典 ──
-        elif m := re.match(r'^查日文\s*(.+)$', text):
-            reply_text = fetch_jisho(m.group(1).strip())
 
 
-        elif m := re.match(r'^漢字\s*([^\s])$', text):
-            reply_text = fetch_kanji(m.group(1))
 
 
         # ── 西班牙文字典 ──
-        elif m := re.match(r'^查西文\s*(.+)$', text):
-            reply_text = fetch_spanish(m.group(1).strip())
 
 
         # ── 日文問題 ──
@@ -564,12 +527,6 @@ def handle_message(event):
             reply_text = jp
 
         # ── 關鍵字回覆（隨機觸發避免煩人）──
-        elif re.search(r'冷笑話', text):
-            reply_text = handle_joke(text)
-
-        elif re.search(r'冷知識', text):
-            reply_text = handle_fun_fact(text)
-
         elif re.search(r'特休|年假|請假|休假', text) and random.random() < 0.65:
             reply_text = handle_leave(text)
 
@@ -595,8 +552,6 @@ def handle_message(event):
             reply_text = "請傳「BMI 身高 體重」\n例：BMI 165 55"
 
         # ── 熱量 ──
-        elif m := re.match(r'^熱量\s+(.+)$', text):
-            reply_text = fetch_nutrition(m.group(1).strip())
 
         # ── 消耗熱量 ──
         elif m := re.match(r'^消耗熱量\s+(.+?)(?:\s+(\d+)分鐘?)?$', text):
@@ -611,8 +566,6 @@ def handle_message(event):
         # ── 數字冷知識 ──
 
         # ── 食譜 [食材] ──
-        elif m := re.match(r'^食譜\s+(.+)$', text):
-            reply_text = fetch_recipe_by_ingredient(m.group(1).strip())
 
         # ── QR Code ──
         elif m := re.match(r'^QR\s+(.+)$', text, re.IGNORECASE):
@@ -622,8 +575,6 @@ def handle_message(event):
             reply_image_url = qr_img
 
         # ── 縮網址 ──
-        elif m := re.match(r'^縮網址\s+(.+)$', text):
-            reply_text = shorten_url(m.group(1).strip())
 
         # ── YouTube 搜尋 ──
         elif m := re.match(r'^找影片\s+(.+)$', text):
