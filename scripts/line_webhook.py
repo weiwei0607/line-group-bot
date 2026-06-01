@@ -797,18 +797,7 @@ def _parse_anime_quote(item: dict) -> str | None:
 
 
 def fetch_anime_quote() -> str:
-    # Primary: RapidAPI
-    d = _rapid("get", "anime-quotes4.p.rapidapi.com", "/")
-    if d is not _QUOTA and d:
-        try:
-            item = random.choice(d) if isinstance(d, list) else d
-            result = _parse_anime_quote(item)
-            if result:
-                return result
-        except Exception:
-            pass
-
-    # Fallback: animechan.io (free, no key)
+    # Primary: animechan.io (free, no key)
     try:
         r = requests.get("https://animechan.io/api/v1/quotes/random", timeout=8)
         if r.status_code == 200:
@@ -820,7 +809,7 @@ def fetch_anime_quote() -> str:
     except Exception:
         pass
 
-    # Last resort: Gemini
+    # Fallback: Gemini
     return call_gemini(
         "給我一句動漫裡的經典語錄，格式：\n🌸 「語錄」\n— 角色名《作品名》"
     ) or "🌸 動漫語錄暫時失靈，待會再試"
