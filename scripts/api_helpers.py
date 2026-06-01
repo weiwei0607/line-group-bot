@@ -167,7 +167,7 @@ def fetch_spotify_track(query: str) -> str:
             lines.append(f"• {name} — {artist}")
         return "\n".join(lines)
     except Exception as e:
-        logger.warning("[spotify] %s", "e")
+        logger.warning("[spotify] %s", e)
         return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」😢"
 
 
@@ -192,7 +192,7 @@ def fetch_imdb(title: str) -> str:
             f"⭐ {rating}/10" if rating else f"🎬 {title_str}（{year}）"
         )
     except Exception as e:
-        logger.warning("[imdb] %s", "e")
+        logger.warning("[imdb] %s", e)
         return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 查不到「{title}」😢"
 
 
@@ -241,7 +241,7 @@ def fetch_streaming(title: str) -> str:
             lines.append(f"  • {svc.capitalize()}")
         return "\n".join(lines)
     except Exception as e:
-        logger.warning("[streaming] %s", "e")
+        logger.warning("[streaming] %s", e)
         return _gemini_streaming()
 
 
@@ -438,7 +438,7 @@ def fetch_superhero(name: str) -> str:
             f"智力 {stats.get('intelligence', '?')}　能量 {stats.get('power', '?')}"
         )
     except Exception as e:
-        logger.warning("[superhero] %s", "e")
+        logger.warning("[superhero] %s", e)
         return f"🦸 查不到「{name}」，試試英文名字"
 
 
@@ -622,7 +622,7 @@ def fetch_gold_price() -> str:
         _daily_cache_set("gold_price", result)
         return result
     except Exception as e:
-        logger.warning("[gold] %s", "e")
+        logger.warning("[gold] %s", e)
         return "🪙 金價查詢失敗"
 
 
@@ -1004,7 +1004,7 @@ def fetch_youtube(query: str) -> str:
                 lines.append(f"• {title}\n  {channel}\n  https://youtu.be/{vid_id}")
         return "\n".join(lines)
     except Exception as e:
-        logger.warning("[youtube] %s", "e")
+        logger.warning("[youtube] %s", e)
         return f"🎬 找不到「{query}」相關影片"
 
 

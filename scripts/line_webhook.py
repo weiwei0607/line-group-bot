@@ -65,7 +65,7 @@ def health():
 
 def handle_exception(e):
     import traceback
-    print(f"[error] {e}")
+    logging.error("Unhandled exception: %s", e)
     traceback.print_exc()
 
 
@@ -139,11 +139,11 @@ def _start_scheduler():
         scheduler.add_job(_silence_check, CronTrigger(hour=12, minute=0, timezone=tz))
 
         scheduler.start()
-        print("[scheduler] all jobs scheduled")
+        logging.info("Scheduler started, all jobs scheduled")
     except ImportError:
-        print("[scheduler] apscheduler not installed, skipping")
+        logging.info("apscheduler not installed, skipping")
     except Exception as e:
-        print(f"[scheduler] failed to start: {e}")
+        logging.error("Scheduler failed to start: %s", e)
 
 
 _start_scheduler()

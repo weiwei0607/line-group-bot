@@ -9,6 +9,7 @@ import html as _html
 import random
 import threading
 import requests
+import logging
 from datetime import datetime, timedelta
 from goal_tracker import TW_TZ
 from goal_tracker import (
@@ -26,6 +27,7 @@ from goal_tracker import (
 )
 
 from api_helpers import *
+from state import quiz_get, quiz_set, quiz_delete, vote_get, vote_set, vote_delete, translate_get, translate_delete, remove_bg_get, remove_bg_set
 from weather import send_morning_greeting, _parse_date_offset, get_weather_v2
 from horoscope import fetch_horoscope
 from dispatch import try_dispatch
@@ -490,8 +492,7 @@ def handle_message(event):
                     cat = res[0].get("category", "")
                     wrong = [_html.unescape(w) for w in res[0].get("incorrect_answers", [])]
             except Exception as _exc:
-                print(f'[warn] {_exc}')
-                pass
+                logging.warning("opentdb error: %s", _exc)
             # API Ninjas fallback（沒有選項，只給填空）
             if not question:
                 d = _ninja("/v1/trivia")
@@ -515,19 +516,19 @@ def handle_message(event):
                     for k, v in opts.items():
                         opts_zh[k] = smart_translate(v) or v
                     correct_zh = opts_zh[correct_letter]
-                    _QUIZ_STATE[gid] = {
+                    quiz_set(gid, {
                         "question": q_zh or question,
                         "answer": correct_zh,
                         "correct_letter": correct_letter,
                         "options": opts_zh,
-                    }
+                    })
                     opts_str = "\n".join(f"  {k}. {v}" for k, v in opts_zh.items())
                     reply_text = (
                         f"🧠 來答題！（{cat}）\n\n{q_zh or question}\n\n"
                         f"{opts_str}\n\n傳「A」「B」「C」「D」作答，傳「答案」看解答"
                     )
                 else:
-                    _QUIZ_STATE[gid] = {"question": q_zh or question, "answer": a_zh}
+                    quiz_set(gid, {"question": q_zh or question, "answer": a_zh})
                     reply_text = (
                         f"🧠 來答題！（{cat}）\n\n{q_zh or question}\n\n"
                         f"傳「答 你的答案」作答，傳「答案」看解答"
@@ -537,25 +538,25 @@ def handle_message(event):
 
         elif m := re.match(r'^([ABCD])$', text.strip().upper()):
             gid = group_id or "default"
-            if gid in _QUIZ_STATE and "options" in _QUIZ_STATE[gid]:
-                state = _QUIZ_STATE[gid]
+            qstate = quiz_get(gid)
+            if qstate and "options" in qstate:
                 chosen = text.strip().upper()
                 if chosen == state["correct_letter"]:
-                    _QUIZ_STATE.pop(gid)
+                    quiz_delete(gid)
                     new_score = add_quiz_score(member_label)
                     reply_text = f"🎉 答對了！答案是 {state['correct_letter']}. {state['answer']}\n{member_label} 本週答對 {new_score} 題！"
                 else:
-                    chosen_ans = state["options"].get(chosen, chosen)
+                    chosen_ans = qvstate["options"].get(chosen, chosen)
                     reply_text = f"❌ {chosen}. {chosen_ans} 不對喔，再想想！（傳「答案」放棄）"
 
         elif m := re.match(r'^答\s+(.+)$', text):
             gid = group_id or "default"
-            if gid in _QUIZ_STATE:
-                state = _QUIZ_STATE[gid]
+            qstate = quiz_get(gid)
+            if qstate:
                 user_ans = m.group(1).strip().lower()
-                correct = state["answer"].lower()
+                correct = qstate["answer"].lower()
                 if correct in user_ans or user_ans in correct:
-                    _QUIZ_STATE.pop(gid)
+                    quiz_delete(gid)
                     new_score = add_quiz_score(member_label)
                     reply_text = f"🎉 答對了！答案是：{state['answer']}\n{member_label} 本週答對 {new_score} 題！"
                 else:
@@ -563,8 +564,8 @@ def handle_message(event):
 
         elif text == "答案":
             gid = group_id or "default"
-            if gid in _QUIZ_STATE:
-                state = _QUIZ_STATE.pop(gid)
+            if quiz_get(gid) is not None:
+                state = quiz_delete(gid)
                 if "correct_letter" in state:
                     reply_text = f"💡 答案是 {state['correct_letter']}. {state['answer']}"
                 else:
@@ -753,12 +754,12 @@ def handle_message(event):
             raw_opts = re.split(r'[\s,，]+', m.group(2).strip())
             opts = [o for o in raw_opts if o][:4]
             if len(opts) >= 2:
-                _VOTE_STATE[gid] = {
+                vote_set(gid, {
                     "question": question,
                     "options": opts,
                     "votes": {},
                     "ts": datetime.now(TW_TZ).isoformat(),
-                }
+                })
                 letters = ["A", "B", "C", "D"]
                 opts_str = "\n".join(f"  {letters[i]}. {opts[i]}" for i in range(len(opts)))
                 reply_text = (
@@ -770,38 +771,38 @@ def handle_message(event):
 
         elif m := re.match(r'^投([ABCD])$', text.strip().upper()):
             gid = group_id or "default"
-            if gid in _VOTE_STATE:
-                state = _VOTE_STATE[gid]
+            vstate = vote_get(gid)
+            if vstate:
                 chosen = m.group(1)
                 idx = ord(chosen) - ord("A")
-                if idx < len(state["options"]):
-                    state["votes"][member_label] = chosen
-                    opt_name = state["options"][idx]
+                if idx < len(qvstate["options"]):
+                    vstate["votes"][member_label] = chosen
+                    opt_name = qvstate["options"][idx]
                     reply_text = f"✅ {member_label} 投了 {chosen}. {opt_name}"
                     # 投票數達到成員數時自動結算
-                    if len(state["votes"]) >= max(2, len(MEMBERS)):
+                    if len(vstate["votes"]) >= max(2, len(MEMBERS)):
                         from collections import Counter
-                        cnt = Counter(state["votes"].values())
+                        cnt = Counter(vstate["votes"].values())
                         winner_letter = cnt.most_common(1)[0][0]
                         winner_idx = ord(winner_letter) - ord("A")
-                        winner_name = state["options"][winner_idx]
+                        winner_name = qvstate["options"][winner_idx]
                         detail = " / ".join(f"{k}: {v}票" for k, v in sorted(cnt.items()))
                         reply_text += f"\n\n🎉 全員投票完畢！\n結果：{winner_letter}. {winner_name} 勝出\n（{detail}）"
-                        _VOTE_STATE.pop(gid)
+                        vote_delete(gid)
 
         elif text == "投票結果":
             gid = group_id or "default"
-            if gid in _VOTE_STATE:
-                state = _VOTE_STATE[gid]
+            vstate = vote_get(gid)
+            if vstate:
                 from collections import Counter
-                cnt = Counter(state["votes"].values())
+                cnt = Counter(vstate["votes"].values())
                 lines = [f"📊 {state['question']} 目前票數："]
                 letters = ["A", "B", "C", "D"]
-                for i, opt in enumerate(state["options"]):
+                for i, opt in enumerate(qvstate["options"]):
                     letter = letters[i]
                     votes = cnt.get(letter, 0)
                     bar = "█" * votes + "░" * (len(MEMBERS) - votes)
-                    who = [n for n, v in state["votes"].items() if v == letter]
+                    who = [n for n, v in vstate["votes"].items() if v == letter]
                     lines.append(f"  {letter}. {opt}｜{bar} {votes}票 {('（' + '、'.join(who) + '）') if who else ''}")
                 reply_text = "\n".join(lines)
             else:
@@ -809,7 +810,7 @@ def handle_message(event):
 
         elif text == "取消投票":
             gid = group_id or "default"
-            _VOTE_STATE.pop(gid, None)
+            vote_delete(gid)
             reply_text = "投票已取消"
 
         # ── 隨機挑戰 ──
@@ -823,16 +824,17 @@ def handle_message(event):
         # ── 去背（等待圖片） ──
         elif text == "去背":
             if user_id:
-                _REMOVE_BG_PENDING.add(user_id)
+                remove_bg_set(user_id, True)
                 reply_text = "請傳一張圖片，我幫你去背 🖼️"
 
         # ── 待翻譯輸入 ──
-        elif user_id and user_id in _TRANSLATE_PENDING:
+        elif user_id and translate_get(user_id) is not None:
             if text in ("取消", "算了", "不翻了"):
-                _TRANSLATE_PENDING.pop(user_id, None)
+                translate_delete(user_id)
                 reply_text = "好，取消翻譯 👌"
             else:
-                lang_code = _TRANSLATE_PENDING.pop(user_id)
+                lang_code = translate_get(user_id)
+                translate_delete(user_id)
                 reply_text = translate_text(text, lang_code)
 
         # ── 被點名 ──
@@ -866,7 +868,7 @@ def handle_audio(event):
             blob_api = MessagingApiBlob(api_client)
             audio_bytes = blob_api.get_message_content(event.message.id)
         except Exception as _exc:
-            print(f'[warn] {_exc}')
+            logging.warning("get_message_content error: %s", _exc)
             return
         # Reply immediately, push result after Shazam finishes
         MessagingApi(api_client).reply_message(
@@ -889,14 +891,14 @@ def handle_image(event):
             blob_api = MessagingApiBlob(api_client)
             img_bytes = blob_api.get_message_content(event.message.id)
         except Exception as _exc:
-            print(f'[warn] {_exc}')
+            logging.warning("get_message_content error: %s", _exc)
             return
 
         line_api = MessagingApi(api_client)
 
         # ── 去背 pending flow ──
-        if user_id and user_id in _REMOVE_BG_PENDING:
-            _REMOVE_BG_PENDING.discard(user_id)
+        if user_id and remove_bg_get(user_id):
+            remove_bg_set(user_id, False)
             line_api.reply_message(ReplyMessageRequest(
                 reply_token=reply_token,
                 messages=[TextMessage(text="🖼️ 去背處理中，請稍候...")],

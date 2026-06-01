@@ -98,8 +98,6 @@ def shazam_identify(audio_bytes: bytes) -> str:
 
 # ─── Background Removal ───────────────────────────────────
 
-_REMOVE_BG_PENDING: set = set()
-
 def remove_background(img_bytes: bytes) -> str | None:
     import io
     d = _rapid("post", "background-remover3.p.rapidapi.com", "/v1.0/removebg/1.0.0",

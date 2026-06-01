@@ -43,20 +43,21 @@ def get_homework():
     except Exception as e:
         return f"（作業生成失敗：{e}）"
 
-homework = get_homework()
+if __name__ == "__main__":
+    homework = get_homework()
 
-message = (
-    "📋 本週語言作業來囉！\n\n"
-    "完成後傳給 Claude Code 批改，週日會有小測驗。\n\n"
-    "━━━━━━━━━━━━━━━\n\n"
-    + homework
-)
+    message = (
+        "📋 本週語言作業來囉！\n\n"
+        "完成後傳給 Claude Code 批改，週日會有小測驗。\n\n"
+        "━━━━━━━━━━━━━━━\n\n"
+        + homework
+    )
 
-if len(message) > 4096:
-    message = message[:4090] + "..."
+    if len(message) > 4096:
+        message = message[:4090] + "..."
 
-requests.post(
-    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-    data={"chat_id": CHAT_ID, "text": message},
-    timeout=10,
-)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": message},
+        timeout=10,
+    )

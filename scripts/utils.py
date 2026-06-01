@@ -32,7 +32,7 @@ def call_gemini(prompt: str, timeout: int = 12) -> str | None:
             return None
         return parts[0].get("text", "").strip()
     except Exception as exc:
-        print(f"[warn] call_gemini: {exc}")
+        logging.warning("call_gemini: %s", exc)
         return None
 
 
@@ -45,7 +45,7 @@ def send_line_message(text: str, group_id: str | None = None, mentions: list | N
     token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
     gid = group_id or os.environ.get("LINE_GROUP_ID", "")
     if not token or not gid:
-        print("[warn] send_line_message: missing token or group_id")
+        logging.warning("send_line_message: missing token or group_id")
         return
     msg = {"type": "text", "text": text}
     if mentions:
@@ -61,7 +61,7 @@ def send_line_message(text: str, group_id: str | None = None, mentions: list | N
             timeout=10,
         )
     except Exception as exc:
-        print(f"[warn] send_line_message: {exc}")
+        logging.warning("send_line_message: %s", exc)
 
 
 def push_to_group(text: str) -> None:
@@ -84,4 +84,4 @@ def send_telegram_alert(msg: str) -> None:
             timeout=10,
         )
     except Exception as exc:
-        print(f"[warn] send_telegram_alert: {exc}")
+        logging.warning("send_telegram_alert: %s", exc)

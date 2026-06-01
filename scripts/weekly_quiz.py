@@ -44,20 +44,21 @@ def get_quiz():
     except Exception as e:
         return f"（測驗生成失敗：{e}）"
 
-quiz_content = get_quiz()
+if __name__ == "__main__":
+    quiz_content = get_quiz()
 
-message = (
-    "📝 本週語言小測驗\n\n"
-    "試著作答，再看答案！答案在最下面。\n\n"
-    "━━━━━━━━━━━━━━━\n\n"
-    + quiz_content
-)
+    message = (
+        "📝 本週語言小測驗\n\n"
+        "試著作答，再看答案！答案在最下面。\n\n"
+        "━━━━━━━━━━━━━━━\n\n"
+        + quiz_content
+    )
 
-if len(message) > 4096:
-    message = message[:4090] + "..."
+    if len(message) > 4096:
+        message = message[:4090] + "..."
 
-requests.post(
-    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-    data={"chat_id": CHAT_ID, "text": message},
-    timeout=10,
-)
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": message},
+        timeout=10,
+    )

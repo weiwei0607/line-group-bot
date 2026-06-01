@@ -442,7 +442,7 @@ def _rapid(method: str, host: str, path: str, **kwargs):
             _rapid_idx = (_rapid_idx + attempt + 1) % n  # advance after success
             return r.json()
         except Exception as e:
-            logger.warning("[RapidAPI] %s", "host}{path} → {e")
+            logger.warning("[RapidAPI] %s%s → %s", host, path, e)
             return None
     logger.warning("[RapidAPI] all %s keys quota exceeded: %s%s", n, host, path)
     return _QUOTA
@@ -469,44 +469,36 @@ def _ninja(path: str, **kwargs):
             _ninja_idx = (_ninja_idx + attempt + 1) % n  # advance after success
             return r.json()
         except Exception as e:
-            logger.warning("[api-ninjas] %s", "path} → {e")
+            logger.warning("[api-ninjas] %s → %s", path, e)
             return None
     # all ninja keys exhausted, fall back to RapidAPI
     return _rapid("get", "api-ninjas.p.rapidapi.com", path, **kwargs)
 
 
-# ─── Translation ──────────────────────────────────────────
-
-_TRANSLATE_PENDING: dict = {}
-_QUIZ_STATE: dict = {}  # group_id -> {question, answer, options?, correct_letter?}
-_VOTE_STATE: dict = {}  # group_id -> {question, options: list, votes: {nick: option}, ts}
-
-# ─── 短期對話記憶 ──────────────────────────────────────────
-_CHAT_MEMORY: deque = deque(maxlen=20)  # (nickname, text) tuples, rolling window
+# ─── State wrappers (SQLite-backed, survives restarts) ──
+from state import (
+    daily_get as _daily_get,
+    daily_set as _daily_set,
+    chat_append as _chat_append,
+    chat_get as _chat_get,
+)
 
 def _remember(nickname: str, text: str):
-    _CHAT_MEMORY.append((nickname, text))
+    _chat_append(nickname, text)
 
 def _get_recent_context(n: int = 8) -> str:
-    recent = list(_CHAT_MEMORY)[-n:]
+    recent = _chat_get(n)
     if not recent:
         return ""
     return "\n".join(f"{nick}：{msg}" for nick, msg in recent)
 
-# ─── 當日 Cache ────────────────────────────────────────────
-_DAILY_CACHE: dict = {}  # (key, date_str) -> result
-
 def _daily_cached(key: str):
     date_str = datetime.now(TW_TZ).strftime("%Y-%m-%d")
-    return _DAILY_CACHE.get((key, date_str))
+    return _daily_get(key, date_str)
 
 def _daily_cache_set(key: str, value):
     date_str = datetime.now(TW_TZ).strftime("%Y-%m-%d")
-    _DAILY_CACHE[(key, date_str)] = value
-    # 清掉昨天的 key
-    for k in list(_DAILY_CACHE.keys()):
-        if k[1] != date_str:
-            del _DAILY_CACHE[k]
+    _daily_set(key, value, date_str)
 
 
 # ─── Async reply → push helper ────────────────────────────
@@ -662,7 +654,8 @@ def handle_translate(user_id: str, text: str) -> str:
         code = _LANG_MAP.get(m.group(1))
         if not code:
             return f"不認識「{m.group(1)}」\n支援：{'、'.join(list(_LANG_MAP.keys())[:10])}..."
-        _TRANSLATE_PENDING[user_id] = code
+        from state import translate_set
+        translate_set(user_id, code)
         return f"要翻成{m.group(1)}，請傳要翻的文字 👇\n（傳「取消」取消）"
     langs = "、".join(list(_LANG_MAP.keys())[:8]) + "..."
     return f"格式：翻 日文 要翻的文字\n支援：{langs}"
