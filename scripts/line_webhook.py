@@ -97,6 +97,7 @@ _SKIP_LOG = {
     "指令", "說明", "幫助", "help", "功能",
     "積分", "本週積分", "答題積分", "quiz積分",
     "本週總結", "週總結", "本週回顧",
+    "投票結果", "取消投票", "來一題", "答案",
 }
 
 
@@ -105,7 +106,7 @@ def _should_log(text: str) -> bool:
         return False
     if text in _SKIP_LOG:
         return False
-    if re.match(r'^(叫我|我是|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標|QR\s|縮網址\s|找影片\s|改寫\s|配對星座\s|查日文\s|查西文\s|漢字\s|食譜\s|熱量\s|消耗熱量\s|BMI\s|寶可夢\s|找書\s|國家\s)', text, re.IGNORECASE):
+    if re.match(r'^(叫我|我是|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標|QR\s|縮網址\s|找影片\s|改寫\s|配對星座\s|查日文\s|查西文\s|漢字\s|食譜\s|熱量\s|消耗熱量\s|BMI\s|寶可夢\s|找書\s|國家\s|投票\s|投[ABCD]$)', text, re.IGNORECASE):
         return False
     return True
 
@@ -1922,7 +1923,8 @@ def fetch_horoscope(text) -> str:
                 t.start()
             for t in threads:
                 t.join(timeout=15)
-            lines = [f"🔮 今日運勢（{today}）\n"]
+            fetch_time = datetime.now(TW_TZ).strftime("%H:%M")
+            lines = [f"🔮 今日運勢（{today} 資料時間 {fetch_time}）\n"]
             for i, (_, nick, _) in enumerate(members):
                 lines.append(f"【{nick}】{results[i] or '查詢失敗'}")
             output = "\n\n".join(lines)
@@ -2464,6 +2466,10 @@ def handle_message(event):
         elif text == "!groupid":
             reply_text = f"Group ID: {group_id or '非群組訊息'}"
 
+        elif text == "!測試早安":
+            reply_text = "⏳ 生成早安訊息中..."
+            threading.Thread(target=send_morning_greeting, daemon=True).start()
+
         elif m := re.match(r'^!設星座\s+(\S+)\s+(.+)$', text):
             nick_target, sign_input = m.group(1).strip(), m.group(2).strip().rstrip("座")
             matched = next((k for k in _ZODIAC if k.rstrip("座") == sign_input or k == sign_input), None)
@@ -2695,39 +2701,77 @@ def handle_message(event):
                 body_part = m2.group(1).strip()
             reply_text = fetch_exercise(body_part)
 
-        # ── 來一題（互動問答，有狀態）──
+        # ── 來一題（A/B/C/D 選擇題）──
         elif text == "來一題":
-            question, answer, cat = "", "", ""
-            # API Ninjas
-            d = _ninja("/v1/trivia")
-            if d and d is not _QUOTA and isinstance(d, list):
-                question = d[0].get("question", "")
-                answer = d[0].get("answer", "")
-                cat = d[0].get("category", "")
-            # opentdb fallback
+            question, answer, cat, wrong = "", "", "", []
+            # opentdb 優先（有 wrong_answers）
+            try:
+                import html as _html
+                r2 = requests.get("https://opentdb.com/api.php",
+                                  params={"amount": 1, "type": "multiple"}, timeout=8)
+                res = r2.json().get("results", [])
+                if res:
+                    question = _html.unescape(res[0].get("question", ""))
+                    answer = _html.unescape(res[0].get("correct_answer", ""))
+                    cat = res[0].get("category", "")
+                    wrong = [_html.unescape(w) for w in res[0].get("incorrect_answers", [])]
+            except Exception:
+                pass
+            # API Ninjas fallback（沒有選項，只給填空）
             if not question:
-                try:
-                    import html as _html
-                    r2 = requests.get("https://opentdb.com/api.php",
-                                      params={"amount": 1, "type": "multiple"}, timeout=8)
-                    res = r2.json().get("results", [])
-                    if res:
-                        question = _html.unescape(res[0].get("question", ""))
-                        answer = _html.unescape(res[0].get("correct_answer", ""))
-                        cat = res[0].get("category", "")
-                except Exception:
-                    pass
+                d = _ninja("/v1/trivia")
+                if d and d is not _QUOTA and isinstance(d, list):
+                    question = d[0].get("question", "")
+                    answer = d[0].get("answer", "")
+                    cat = d[0].get("category", "")
             if question:
                 q_zh = smart_translate(question)
-                a_zh = smart_translate(answer)
+                a_zh = smart_translate(answer) or answer
                 gid = group_id or "default"
-                _QUIZ_STATE[gid] = {"question": q_zh or question, "answer": a_zh or answer}
-                reply_text = (
-                    f"🧠 來答題！（{cat}）\n\n{q_zh or question}\n\n"
-                    f"傳「答 你的答案」作答，傳「答案」看解答"
-                )
+                if wrong:
+                    # 建立 A/B/C/D 選項
+                    choices = [answer] + wrong[:3]
+                    random.shuffle(choices)
+                    letters = ["A", "B", "C", "D"]
+                    opts = {letters[i]: choices[i] for i in range(len(choices))}
+                    correct_letter = next(k for k, v in opts.items() if v == answer)
+                    # 翻譯選項
+                    opts_zh = {}
+                    for k, v in opts.items():
+                        opts_zh[k] = smart_translate(v) or v
+                    correct_zh = opts_zh[correct_letter]
+                    _QUIZ_STATE[gid] = {
+                        "question": q_zh or question,
+                        "answer": correct_zh,
+                        "correct_letter": correct_letter,
+                        "options": opts_zh,
+                    }
+                    opts_str = "\n".join(f"  {k}. {v}" for k, v in opts_zh.items())
+                    reply_text = (
+                        f"🧠 來答題！（{cat}）\n\n{q_zh or question}\n\n"
+                        f"{opts_str}\n\n傳「A」「B」「C」「D」作答，傳「答案」看解答"
+                    )
+                else:
+                    _QUIZ_STATE[gid] = {"question": q_zh or question, "answer": a_zh}
+                    reply_text = (
+                        f"🧠 來答題！（{cat}）\n\n{q_zh or question}\n\n"
+                        f"傳「答 你的答案」作答，傳「答案」看解答"
+                    )
             else:
                 reply_text = "🧠 題庫暫時關閉，待會再試"
+
+        elif m := re.match(r'^([ABCD])$', text.strip().upper()):
+            gid = group_id or "default"
+            if gid in _QUIZ_STATE and "options" in _QUIZ_STATE[gid]:
+                state = _QUIZ_STATE[gid]
+                chosen = text.strip().upper()
+                if chosen == state["correct_letter"]:
+                    _QUIZ_STATE.pop(gid)
+                    new_score = add_quiz_score(member_label)
+                    reply_text = f"🎉 答對了！答案是 {state['correct_letter']}. {state['answer']}\n{member_label} 本週答對 {new_score} 題！"
+                else:
+                    chosen_ans = state["options"].get(chosen, chosen)
+                    reply_text = f"❌ {chosen}. {chosen_ans} 不對喔，再想想！（傳「答案」放棄）"
 
         elif m := re.match(r'^答\s+(.+)$', text):
             gid = group_id or "default"
@@ -2746,7 +2790,10 @@ def handle_message(event):
             gid = group_id or "default"
             if gid in _QUIZ_STATE:
                 state = _QUIZ_STATE.pop(gid)
-                reply_text = f"💡 答案是：{state['answer']}"
+                if "correct_letter" in state:
+                    reply_text = f"💡 答案是 {state['correct_letter']}. {state['answer']}"
+                else:
+                    reply_text = f"💡 答案是：{state['answer']}"
 
         # ── 今日調酒 ──
         elif re.match(r'^今日調酒', text):
@@ -2923,6 +2970,80 @@ def handle_message(event):
         # ── 新聞 ──
         elif text in ("新聞", "今日新聞", "最新新聞"):
             reply_text = fetch_news()
+
+        # ── 投票 ──
+        elif m := re.match(r'^投票\s+(.+?)(?:\s{1,2}|\s*[,，]\s*)(.+)$', text):
+            gid = group_id or "default"
+            question = m.group(1).strip()
+            raw_opts = re.split(r'[\s,，]+', m.group(2).strip())
+            opts = [o for o in raw_opts if o][:4]
+            if len(opts) >= 2:
+                _VOTE_STATE[gid] = {
+                    "question": question,
+                    "options": opts,
+                    "votes": {},
+                    "ts": datetime.now(TW_TZ).isoformat(),
+                }
+                letters = ["A", "B", "C", "D"]
+                opts_str = "\n".join(f"  {letters[i]}. {opts[i]}" for i in range(len(opts)))
+                reply_text = (
+                    f"📊 投票開始！\n\n{question}\n\n{opts_str}\n\n"
+                    f"傳「投A」「投B」... 投票，傳「投票結果」查看"
+                )
+            else:
+                reply_text = "格式：投票 問題 選項1 選項2 選項3\n例：投票 週末去哪 北部 中部 南部"
+
+        elif m := re.match(r'^投([ABCD])$', text.strip().upper()):
+            gid = group_id or "default"
+            if gid in _VOTE_STATE:
+                state = _VOTE_STATE[gid]
+                chosen = m.group(1)
+                idx = ord(chosen) - ord("A")
+                if idx < len(state["options"]):
+                    state["votes"][member_label] = chosen
+                    opt_name = state["options"][idx]
+                    reply_text = f"✅ {member_label} 投了 {chosen}. {opt_name}"
+                    # 全員投完自動結算
+                    if len(state["votes"]) >= len(MEMBERS):
+                        from collections import Counter
+                        cnt = Counter(state["votes"].values())
+                        winner_letter = cnt.most_common(1)[0][0]
+                        winner_idx = ord(winner_letter) - ord("A")
+                        winner_name = state["options"][winner_idx]
+                        detail = " / ".join(f"{k}: {v}票" for k, v in sorted(cnt.items()))
+                        reply_text += f"\n\n🎉 全員投票完畢！\n結果：{winner_letter}. {winner_name} 勝出\n（{detail}）"
+                        _VOTE_STATE.pop(gid)
+
+        elif text == "投票結果":
+            gid = group_id or "default"
+            if gid in _VOTE_STATE:
+                state = _VOTE_STATE[gid]
+                from collections import Counter
+                cnt = Counter(state["votes"].values())
+                lines = [f"📊 {state['question']} 目前票數："]
+                letters = ["A", "B", "C", "D"]
+                for i, opt in enumerate(state["options"]):
+                    letter = letters[i]
+                    votes = cnt.get(letter, 0)
+                    bar = "█" * votes + "░" * (len(MEMBERS) - votes)
+                    who = [n for n, v in state["votes"].items() if v == letter]
+                    lines.append(f"  {letter}. {opt}｜{bar} {votes}票 {('（' + '、'.join(who) + '）') if who else ''}")
+                reply_text = "\n".join(lines)
+            else:
+                reply_text = "目前沒有進行中的投票"
+
+        elif text == "取消投票":
+            gid = group_id or "default"
+            _VOTE_STATE.pop(gid, None)
+            reply_text = "投票已取消"
+
+        # ── 隨機挑戰 ──
+        elif re.search(r'隨機挑戰|幫我想挑戰|給我挑戰', text):
+            _async_push(reply_token, "🎯 出題中...", lambda: call_gemini(
+                "幫我想一個有趣的7天個人小挑戰，適合上班族或學生，具體可執行，"
+                "格式：\n🎯 本週挑戰：[挑戰名稱]\n\n每天要做：[具體行動]\n\n為什麼值得試：[一句話]\n\n加油！"
+            ) or "🎯 本週挑戰：每天喝 2000ml 水\n\n每天要做：用水杯計量，睡前確認\n\n為什麼值得試：改善皮膚和精神狀態 💪")
+            return
 
         # ── 去背（等待圖片） ──
         elif text == "去背":
@@ -3175,8 +3296,67 @@ def _start_scheduler():
             except Exception as e:
                 send_telegram_alert(f"早安提醒失敗：{e}")
         scheduler.add_job(_safe_morning, CronTrigger(hour=8, minute=0, timezone=tz))
+
+        # 週日 21:00 推積分排行 + 週總結
+        def _weekly_sunday_push():
+            try:
+                scores = get_quiz_scores()
+                if scores:
+                    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+                    medals = ["🥇", "🥈", "🥉"]
+                    lines = ["🏆 本週答題積分結算！"]
+                    for i, (nick, s) in enumerate(ranked):
+                        lines.append(f"{medals[i] if i < 3 else '  '} {nick}：{s} 題")
+                    push_to_group("\n".join(lines))
+
+                logs = get_week_chat_logs()
+                if logs:
+                    sample = logs[-80:]
+                    chat_text = "\n".join(f"{n}：{m}" for n, m in sample)
+                    summary = call_gemini(
+                        f"以下是朋友群這週的聊天記錄（節選）：\n{chat_text}\n\n"
+                        "請用輕鬆幽默的語氣，100字以內，整理這週大家聊了什麼、有什麼有趣的事，繁體中文。"
+                    )
+                    if summary:
+                        push_to_group(f"📝 本週群組回顧\n\n{summary}")
+            except Exception as e:
+                send_telegram_alert(f"週日推播失敗：{e}")
+
+        scheduler.add_job(_weekly_sunday_push, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone=tz))
+
+        # 每天 22:00 檢查十日週期是否結束
+        def _check_cycle_end():
+            try:
+                from goal_tracker import get_cycle_info, build_summary_text
+                _, day, total = get_cycle_info()
+                if day == total:
+                    summary = build_summary_text()
+                    push_to_group(f"🎊 十日目標週期結束！\n\n{summary}")
+            except Exception as e:
+                send_telegram_alert(f"週期結束檢查失敗：{e}")
+
+        scheduler.add_job(_check_cycle_end, CronTrigger(hour=22, minute=0, timezone=tz))
+
+        # 每天 12:00 沉默偵測（超過 3 天沒說話就戳一下）
+        def _silence_check():
+            try:
+                last = get_last_activity()
+                if not last:
+                    return
+                from datetime import timedelta
+                if datetime.now(TW_TZ) - last > timedelta(days=3):
+                    msg = call_gemini(
+                        "朋友群已經沉寂超過3天了，幫我寫一則輕鬆有趣的話來炒熱氣氛，"
+                        "可以問問題或發起話題，繁體中文，不超過60字"
+                    ) or "欸你們還活著嗎 👀 說點什麼吧！"
+                    push_to_group(msg)
+            except Exception as e:
+                send_telegram_alert(f"沉默偵測失敗：{e}")
+
+        scheduler.add_job(_silence_check, CronTrigger(hour=12, minute=0, timezone=tz))
+
         scheduler.start()
-        print("[scheduler] morning greeting scheduled at 08:00 Asia/Taipei")
+        print("[scheduler] all jobs scheduled")
     except ImportError:
         print("[scheduler] apscheduler not installed, skipping")
     except Exception as e:
