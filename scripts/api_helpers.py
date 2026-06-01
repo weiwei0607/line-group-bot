@@ -1359,6 +1359,3 @@ def push_to_group(text: str):
     push_text(LINE_GROUP_ID, text)
 
 
-# ─── Re-exports from domain modules ─────────────────────
-from weather import *
-from horoscope import *

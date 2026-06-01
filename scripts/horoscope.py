@@ -2,7 +2,7 @@
 import os
 import random
 import requests
-from api_helpers import _rapid
+from weather import _rapid
 
 _ZODIAC_EN = {
     "牡羊": "aries", "金牛": "taurus", "雙子": "gemini",

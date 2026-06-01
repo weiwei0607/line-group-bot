@@ -4,7 +4,6 @@ import re
 import requests
 from datetime import datetime, timedelta
 from goal_tracker import TW_TZ
-from api_helpers import _daily_cached
 
 # ─── Weather ──────────────────────────────────────────────
 

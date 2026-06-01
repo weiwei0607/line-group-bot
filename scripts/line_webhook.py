@@ -36,6 +36,7 @@ handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 
 from api_helpers import *
+from weather import send_morning_greeting
 
 # Import command handlers from commands module
 from commands import handle_message, handle_audio, handle_image, handle_join

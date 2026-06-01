@@ -25,6 +25,8 @@ from goal_tracker import (
 )
 
 from api_helpers import *
+from weather import send_morning_greeting, _parse_date_offset, get_weather_v2
+from horoscope import fetch_horoscope
 from dispatch import try_dispatch
 
 # LINE messaging configuration (local copy to avoid circular imports)

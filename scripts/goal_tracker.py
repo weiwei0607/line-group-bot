@@ -123,6 +123,20 @@ def get_nickname(user_id):
         return None
 
 
+def get_user_id_by_nickname(nickname: str) -> str | None:
+    """Reverse lookup: given nickname, return LINE user_id (if registered)."""
+    if not GOAL_SHEET_ID or not nickname:
+        return None
+    try:
+        _, rows = _get_nickname_rows()
+        for row in rows[1:]:
+            if len(row) >= 2 and row[1] == nickname:
+                return row[0]
+        return None
+    except Exception:
+        return None
+
+
 def set_nickname(user_id, nickname):
     if not GOAL_SHEET_ID:
         return False
