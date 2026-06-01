@@ -31,6 +31,7 @@ from config import CHANNEL_SECRET, CHANNEL_ACCESS_TOKEN
 from linebot.v3.messaging import Configuration
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max payload
 
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -53,6 +54,15 @@ handler.add(MemberJoinedEvent)(handle_join)
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
+
+    # Deduplication
+    import hashlib
+    from state import kv_get, kv_set
+    dedup_key = f"webhook:{hashlib.sha256(body.encode()).hexdigest()[:32]}"
+    if kv_get(dedup_key):
+        return "OK", 200
+    kv_set(dedup_key, True, ttl_seconds=60)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
@@ -61,7 +71,42 @@ def callback():
 
 @app.route("/health")
 def health():
-    return "OK", 200
+    checks = {}
+    # 1. SQLite state DB
+    try:
+        from state import kv_get
+        kv_get("__health__")
+        checks["state_db"] = "ok"
+    except Exception as e:
+        checks["state_db"] = f"fail: {e}"
+
+    # 2. LINE API connectivity (lightweight bot info check)
+    try:
+        import requests
+        token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+        if token:
+            r = requests.get(
+                "https://api.line.me/v2/bot/info",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5,
+            )
+            checks["line_api"] = "ok" if r.status_code == 200 else f"warn: {r.status_code}"
+        else:
+            checks["line_api"] = "skip: no token"
+    except Exception as e:
+        checks["line_api"] = f"fail: {e}"
+
+    # 3. Google Sheets token refresh check
+    try:
+        from goal_tracker import _get_token
+        _get_token()
+        checks["sheets"] = "ok"
+    except Exception as e:
+        checks["sheets"] = f"fail: {e}"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    status = 200 if all_ok else 503
+    return checks, status
 
 def handle_exception(e):
     import traceback
@@ -77,13 +122,20 @@ def _start_scheduler():
         tz = pytz.timezone("Asia/Taipei")
         scheduler = BackgroundScheduler(timezone=tz)
         def _safe_morning():
+            from state import cron_is_done, cron_mark_done
+            if cron_is_done("morning_greeting"):
+                return
             try:
                 send_morning_greeting()
+                cron_mark_done("morning_greeting")
             except Exception as e:
                 send_telegram_alert(f"早安提醒失敗：{e}")
         scheduler.add_job(_safe_morning, CronTrigger(hour=8, minute=0, timezone=tz))
 
         def _weekly_sunday_push():
+            from state import cron_is_done, cron_mark_done
+            if cron_is_done("weekly_sunday_push"):
+                return
             try:
                 scores = get_quiz_scores()
                 if scores:
@@ -104,24 +156,32 @@ def _start_scheduler():
                     )
                     if summary:
                         push_to_group(f"📝 本週群組回顧\n\n{summary}")
+                cron_mark_done("weekly_sunday_push")
             except Exception as e:
                 send_telegram_alert(f"週日推播失敗：{e}")
 
         scheduler.add_job(_weekly_sunday_push, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone=tz))
 
         def _check_cycle_end():
+            from state import cron_is_done, cron_mark_done
+            if cron_is_done("check_cycle_end"):
+                return
             try:
                 from goal_tracker import get_cycle_info, build_summary_text
                 _, day, total = get_cycle_info()
                 if day == total:
                     summary = build_summary_text()
                     push_to_group(f"🎊 十日目標週期結束！\n\n{summary}")
+                cron_mark_done("check_cycle_end")
             except Exception as e:
                 send_telegram_alert(f"週期結束檢查失敗：{e}")
 
         scheduler.add_job(_check_cycle_end, CronTrigger(hour=22, minute=0, timezone=tz))
 
         def _silence_check():
+            from state import cron_is_done, cron_mark_done
+            if cron_is_done("silence_check"):
+                return
             try:
                 last = get_last_activity()
                 if not last:
@@ -133,6 +193,7 @@ def _start_scheduler():
                         "可以問問題或發起話題，繁體中文，不超過60字"
                     ) or "欸你們還活著嗎 👀 說點什麼吧！"
                     push_to_group(msg)
+                cron_mark_done("silence_check")
             except Exception as e:
                 send_telegram_alert(f"沉默偵測失敗：{e}")
 

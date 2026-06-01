@@ -17,49 +17,64 @@ _write_lock = threading.Lock()
 
 
 def _conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # Each call creates a fresh connection on the *current* thread, then
+    # closes it when the context-manager exits.  No cross-thread sharing
+    # means the default check_same_thread=True is fine and safe.
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
 def _init():
     with _conn() as c:
-        c.execute("""
+        c.execute(
+            """
             CREATE TABLE IF NOT EXISTS kv (
                 key TEXT PRIMARY KEY,
                 value TEXT,
                 expires_at TIMESTAMP
             )
-        """)
-        c.execute("""
+            """
+        )
+        c.execute(
+            """
             CREATE TABLE IF NOT EXISTS chat_memory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nickname TEXT,
                 text TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        c.execute("""
+            """
+        )
+        c.execute(
+            """
             CREATE TABLE IF NOT EXISTS rate_limit (
                 user_id TEXT PRIMARY KEY,
                 count INTEGER DEFAULT 0,
                 window_start TIMESTAMP
             )
-        """)
+            """
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kv_expires ON kv(expires_at)"
+        )
         c.commit()
 
 
 _init()
 
+
 # ─── Generic KV ───────────────────────────────────────────
+
 
 def kv_get(key: str, default=None):
     try:
         with _conn() as c:
             row = c.execute(
-                "SELECT value FROM kv WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
-                (key, datetime.now().isoformat()),
+                "SELECT value FROM kv WHERE key = ? AND (expires_at IS NULL OR expires_at > datetime('now'))",
+                (key,),
             ).fetchone()
             if row:
                 try:
@@ -74,7 +89,7 @@ def kv_get(key: str, default=None):
 def kv_set(key: str, value, ttl_seconds: int | None = None):
     expires = None
     if ttl_seconds:
-        expires = (datetime.now() + timedelta(seconds=ttl_seconds)).isoformat()
+        expires = (datetime.utcnow() + timedelta(seconds=ttl_seconds)).isoformat()
     try:
         with _write_lock, _conn() as c:
             c.execute(
@@ -99,16 +114,14 @@ def kv_delete(key: str):
 def kv_cleanup():
     try:
         with _write_lock, _conn() as c:
-            c.execute(
-                "DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at <= ?",
-                (datetime.now().isoformat(),),
-            )
+            c.execute("DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')")
             c.commit()
     except sqlite3.Error as exc:
         logging.warning("state kv_cleanup error: %s", exc)
 
 
 # ─── Domain-specific helpers ──────────────────────────────
+
 
 def quiz_get(group_id: str):
     return kv_get(f"quiz:{group_id}")
@@ -159,6 +172,7 @@ def remove_bg_set(user_id: str, flag: bool = True):
 
 # ─── Chat memory ──────────────────────────────────────────
 
+
 def chat_append(nickname: str, text: str, max_len: int = 20):
     try:
         with _write_lock, _conn() as c:
@@ -188,9 +202,11 @@ def chat_get(n: int = 8):
 
 # ─── Daily cache ──────────────────────────────────────────
 
+
 def daily_get(key: str, date_str: str | None = None):
     if date_str is None:
         from goal_tracker import TW_TZ
+
         date_str = datetime.now(TW_TZ).strftime("%Y-%m-%d")
     return kv_get(f"daily:{key}:{date_str}")
 
@@ -198,6 +214,7 @@ def daily_get(key: str, date_str: str | None = None):
 def daily_set(key: str, value, date_str: str | None = None):
     if date_str is None:
         from goal_tracker import TW_TZ
+
         date_str = datetime.now(TW_TZ).strftime("%Y-%m-%d")
     kv_set(f"daily:{key}:{date_str}", value, ttl_seconds=172800)
 
@@ -208,10 +225,11 @@ def daily_cleanup():
 
 # ─── Rate limiting ────────────────────────────────────────
 
+
 def rate_limit_check(user_id: str, max_requests: int = 30, window_seconds: int = 60) -> bool:
     """Return True if user is allowed, False if rate-limited."""
-    now = datetime.now().isoformat()
-    window_start = (datetime.now() - timedelta(seconds=window_seconds)).isoformat()
+    now = datetime.utcnow().isoformat()
+    window_start = (datetime.utcnow() - timedelta(seconds=window_seconds)).isoformat()
     try:
         with _write_lock, _conn() as c:
             row = c.execute(
