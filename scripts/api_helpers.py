@@ -33,6 +33,8 @@ from goal_tracker import (
 
 from config import *
 
+from line_push import push_messages, push_text
+
 # Re-export weather/horoscope functions so existing imports keep working
 from weather import (
     fetch_cat_image, fetch_dog_image, fetch_fox_image,
@@ -47,7 +49,6 @@ from horoscope import (
     fetch_horoscope, fetch_news, fetch_random_meal,
     fetch_random_movie, shazam_identify, remove_background, check_nsfw,
 )
-from line_push import push_messages, push_text
 
 
 

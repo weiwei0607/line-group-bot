@@ -38,6 +38,8 @@ app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB max payload
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 
+from api_helpers import *
+
 # Import command handlers from commands module
 from commands import handle_message, handle_audio, handle_image, handle_join
 import logging
@@ -136,9 +138,6 @@ def _start_scheduler():
         from apscheduler.triggers.cron import CronTrigger
         import pytz
         tz = pytz.timezone("Asia/Taipei")
-        # Lazy-load heavy API modules only when scheduler starts
-        from api_helpers import *
-        from weather import send_morning_greeting
         scheduler = BackgroundScheduler(timezone=tz)
         def _safe_morning():
             from state import cron_is_done, cron_mark_done
