@@ -223,10 +223,11 @@ def get_weather(text):
 
 def get_exchange_rate(text):
     pairs = [("USD", "美金", "$"), ("JPY", "日幣", "¥"),
-             ("EUR", "歐元", "€"), ("KRW", "韓元", "₩")]
+             ("EUR", "歐元", "€"), ("KRW", "韓元", "₩"),
+             ("CNY", "人民幣", "¥")]
     targets = [p for p in pairs if p[1] in text or p[0] in text.upper()]
     if not targets:
-        targets = [("USD", "美金", "$"), ("JPY", "日幣", "¥")]
+        targets = [("USD", "美金", "$"), ("JPY", "日幣", "¥"), ("CNY", "人民幣", "¥")]
     try:
         lines = ["💱 即時匯率（對台幣）\n"]
         for code, name, symbol in targets:
@@ -2667,7 +2668,7 @@ def handle_message(event):
             reply_text = handle_countdown(text)
 
         # ── 實用功能 ──
-        elif re.search(r'匯率|美金|日幣|換錢|外幣', text):
+        elif re.search(r'匯率|美金|日幣|人民幣|換錢|外幣', text):
             reply_text = get_exchange_rate(text)
 
         elif re.search(r'天氣', text):
