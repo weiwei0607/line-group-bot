@@ -3,7 +3,7 @@
 Sheets 結構:
   Tab「目標」: cycle_id | member | goals | created_at
   Tab「打卡」: timestamp | cycle_id | day | member | content
-  Tab「暱稱」: user_id | nickname
+  Tab「暱稱」: user_id | nickname | zodiac（星座中文）
   Tab「設定」: key | value  （存 last_activity 等全域設定）
 """
 
@@ -100,6 +100,11 @@ def get_cycle_info(date=None):
 
 # ─── Nickname ─────────────────────────────────────────────
 
+def _get_nickname_rows():
+    token = _get_token()
+    return token, _sheets_get(token, "暱稱!A:C")
+
+
 def get_nickname(user_id):
     cached = _nickname_cache.get(user_id)
     if cached and time.time() - cached[0] < _NICKNAME_TTL:
@@ -107,8 +112,7 @@ def get_nickname(user_id):
     if not GOAL_SHEET_ID:
         return None
     try:
-        token = _get_token()
-        rows = _sheets_get(token, "暱稱!A:B")
+        _, rows = _get_nickname_rows()
         for row in rows[1:]:
             if len(row) >= 2 and row[0] == user_id:
                 _nickname_cache[user_id] = (time.time(), row[1])
@@ -123,18 +127,63 @@ def set_nickname(user_id, nickname):
     if not GOAL_SHEET_ID:
         return False
     try:
-        token = _get_token()
-        rows = _sheets_get(token, "暱稱!A:B")
+        token, rows = _get_nickname_rows()
         for i, row in enumerate(rows[1:], 2):
             if len(row) >= 1 and row[0] == user_id:
                 _sheets_update(token, f"暱稱!B{i}", [[nickname]])
                 _nickname_cache[user_id] = (time.time(), nickname)
                 return True
-        _sheets_append(token, "暱稱!A:B", [[user_id, nickname]])
+        _sheets_append(token, "暱稱!A:C", [[user_id, nickname, ""]])
         _nickname_cache[user_id] = (time.time(), nickname)
         return True
     except Exception:
         return False
+
+
+def get_zodiac(user_id) -> str | None:
+    if not GOAL_SHEET_ID:
+        return None
+    try:
+        _, rows = _get_nickname_rows()
+        for row in rows[1:]:
+            if len(row) >= 1 and row[0] == user_id:
+                return row[2] if len(row) >= 3 and row[2] else None
+        return None
+    except Exception:
+        return None
+
+
+def set_zodiac(user_id, zodiac: str) -> bool:
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token, rows = _get_nickname_rows()
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 1 and row[0] == user_id:
+                _sheets_update(token, f"暱稱!C{i}", [[zodiac]])
+                return True
+        # 沒有暱稱記錄，新增一行
+        _sheets_append(token, "暱稱!A:C", [[user_id, "", zodiac]])
+        return True
+    except Exception:
+        return False
+
+
+def get_all_zodiacs() -> list[tuple[str, str, str]]:
+    """Returns list of (user_id, nickname, zodiac) for members with zodiac set."""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        _, rows = _get_nickname_rows()
+        result = []
+        for row in rows[1:]:
+            if len(row) >= 3 and row[2]:
+                uid = row[0]
+                nick = row[1] if len(row) >= 2 else uid
+                result.append((uid, nick, row[2]))
+        return result
+    except Exception:
+        return []
 
 
 # ─── Goals ────────────────────────────────────────────────

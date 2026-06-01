@@ -26,6 +26,7 @@ from goal_tracker import (
     get_last_cycle_id, get_next_cycle_id, get_next_cycle_start,
     add_personal_memory, get_personal_memories,
     add_todo, get_todos, complete_todo_by_content,
+    get_zodiac, set_zodiac, get_all_zodiacs,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -55,6 +56,7 @@ _NINJA_KEYS = [k for k in [
 BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
 BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 MEMBERS = ["太后", "毛毛", "二毛"]
+LINE_GROUP_ID = os.environ.get("LINE_GROUP_ID", "")
 
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -83,6 +85,8 @@ _SKIP_LOG = {
     "金價", "今日金價", "天文冷知識", "科學冷知識", "數字冷知識",
     "新聞", "今日新聞", "最新新聞",
     "去背", "配對星座",
+    "配額", "/配額", "api配額", "額度",
+    "指令", "說明", "幫助", "help", "功能",
 }
 
 
@@ -91,7 +95,7 @@ def _should_log(text: str) -> bool:
         return False
     if text in _SKIP_LOG:
         return False
-    if re.match(r'^(叫我|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標|QR\s|縮網址\s|找影片\s|改寫\s|配對星座\s|查日文\s|查西文\s|漢字\s|食譜\s|熱量\s|消耗熱量\s|BMI\s|寶可夢\s|找書\s|國家\s)', text, re.IGNORECASE):
+    if re.match(r'^(叫我|我是|設目標[：:]|抽籤|幫我選|幫我決定|選一個|幫我想目標|QR\s|縮網址\s|找影片\s|改寫\s|配對星座\s|查日文\s|查西文\s|漢字\s|食譜\s|熱量\s|消耗熱量\s|BMI\s|寶可夢\s|找書\s|國家\s)', text, re.IGNORECASE):
         return False
     return True
 
@@ -1648,11 +1652,56 @@ def _fetch_horoscope_v2(sign_en: str) -> dict | None:
     return d
 
 
+def fetch_horoscope_for_sign(sign_zh: str) -> str:
+    """Generate horoscope for a single zodiac sign."""
+    sign_en = _ZODIAC.get(sign_zh)
+    if not sign_en:
+        return f"不認識「{sign_zh}」座"
+    data = _fetch_horoscope_aztro(sign_en) or _fetch_horoscope_v2(sign_en)
+    if data:
+        desc_en = data.get("description") or data.get("horoscope") or data.get("prediction", "")
+        mood = data.get("mood", "")
+        color = data.get("color", "")
+        lucky = data.get("lucky_number", "") or data.get("luckyNumber", "")
+        compat_raw = data.get("compatibility", "") or data.get("luckySign", "")
+        compat = _ZODIAC_ZH.get(str(compat_raw).lower(), compat_raw)
+        if desc_en:
+            desc = smart_translate(desc_en)
+            lines = [f"🔮 {sign_zh}座：{desc}"]
+            extra = []
+            if mood:
+                extra.append(f"心情：{mood}")
+            if color:
+                extra.append(f"幸運色：{color}")
+            if lucky:
+                extra.append(f"幸運數字：{lucky}")
+            if compat:
+                extra.append(f"速配：{compat}座")
+            if extra:
+                lines.append("　".join(extra))
+            return "\n".join(lines)
+    return call_gemini(
+        f"用輕鬆有趣的風格給{sign_zh}座今日運勢，包含：整體運勢、幸運色、幸運數字，"
+        f"繁體中文，80字以內，格式：🔮 {sign_zh}座：[運勢內容]"
+    ) or f"🔮 {sign_zh}座運勢查詢失敗"
+
+
 def fetch_horoscope(text) -> str:
     sign_zh = next((k for k in _ZODIAC if k in text), None)
     if not sign_zh:
+        # 嘗試自動跑所有已綁定星座的成員
+        members = get_all_zodiacs()
+        if members:
+            today = datetime.now(TW_TZ).strftime("%-m/%-d")
+            lines = [f"🔮 今日運勢（{today}）\n"]
+            for _, nick, zodiac in members:
+                result = fetch_horoscope_for_sign(zodiac)
+                lines.append(f"【{nick}】{result}")
+            return "\n\n".join(lines)
         signs = " / ".join(_ZODIAC.keys())
-        return f"🔮 請說「今日天蠍」「今日牡羊」...\n支援：{signs}"
+        return (f"🔮 還沒有人綁定星座！\n"
+                f"輸入「我是天蠍」綁定你的星座\n\n"
+                f"或說「今日天蠍」直接查詢\n支援：{signs}")
     sign_en = _ZODIAC[sign_zh]
 
     # 嘗試多個 API 輪班
@@ -2134,7 +2183,39 @@ def handle_message(event):
                 "今日西文單字\n"
                 "\n⚙️ 設定\n"
                 "叫我 [暱稱]\n"
-                "@小棉襖 問任何問題"
+                "我是 [星座]（綁定星座，今日運勢自動跑）\n"
+                "@小棉襖 問任何問題\n"
+                "\n輸入「配額」查看今日額度說明"
+            )
+
+        # ── 配額說明 ──
+        elif text in ("配額", "/配額", "api配額", "額度"):
+            reply_text = (
+                "📊 API 額度說明\n"
+                "\n✅ 完全免費（無限）\n"
+                "天氣 / 匯率 / 倒數\n"
+                "QR碼 / 縮網址\n"
+                "寶可夢 / 國家 / 找書\n"
+                "查日文 / 漢字 / 查西文\n"
+                "諾里斯 / 川普語錄\n"
+                "動漫圖 / 激勵名言\n"
+                "冷笑話 / 給我建議\n"
+                "\n⚡ 有每日額度（RapidAPI 輪班）\n"
+                "找歌 / 查電影 / 電影台詞 / 在哪看\n"
+                "今日運動 / 找運動\n"
+                "今日調酒 / 來一題\n"
+                "動漫語錄 / 隨機梗圖\n"
+                "今日宇宙（NASA）\n"
+                "熱量 / 消耗熱量 / 金價\n"
+                "天文冷知識 / 數字冷知識\n"
+                "食譜 / 找影片（YouTube）\n"
+                "配對星座 / 今日運勢\n"
+                "翻譯 / 摘要\n"
+                "Shazam聽歌 / 去背\n"
+                "\n🤖 Gemini AI（有每日限制）\n"
+                "改寫 / 新聞 / 日西文每日單字\n"
+                "各功能 AI fallback\n"
+                "\n額度用完會自動提示，明天重置 🔄"
             )
 
         # ── 隱藏指令 ──
@@ -2146,6 +2227,17 @@ def handle_message(event):
             nickname = nick_match.group(1).strip()
             ok = set_nickname(user_id, nickname)
             reply_text = f"好的！之後叫你「{nickname}」了 👋" if ok else "登記失敗，等一下再試 😢"
+
+        # ── 星座綁定 ──
+        elif m := re.match(r'^我是\s*(.{2,3}座?)$', text):
+            sign_input = m.group(1).strip().rstrip("座")
+            matched = next((k for k in _ZODIAC if k.rstrip("座") == sign_input or k == sign_input + "座" or k == sign_input), None)
+            if matched and user_id:
+                ok = set_zodiac(user_id, matched)
+                reply_text = f"✅ 已幫你綁定「{matched}」！\n之後輸入「今日運勢」會自動幫你出來 🔮" if ok else "綁定失敗，等一下再試 😢"
+            elif matched is None:
+                signs = " / ".join(_ZODIAC.keys())
+                reply_text = f"不認識這個星座，請用：\n{signs}"
 
         # ── 十日目標：設目標 ──
         elif re.match(r'^設目標[：:]', text):
@@ -2685,6 +2777,64 @@ def handle_join(event):
 @app.route("/health")
 def health():
     return "OK"
+
+
+# ─── Push helper ──────────────────────────────────────────
+
+def push_to_group(text: str):
+    if not LINE_GROUP_ID or not CHANNEL_ACCESS_TOKEN:
+        return
+    try:
+        requests.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={
+                "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"to": LINE_GROUP_ID, "messages": [{"type": "text", "text": text[:4900]}]},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"[push] {e}")
+
+
+# ─── 早安提醒 ─────────────────────────────────────────────
+
+def send_morning_greeting():
+    today = datetime.now(TW_TZ)
+    weekdays = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
+    weekday = weekdays[today.weekday()]
+    date_str = today.strftime(f"%-m月%-d日 {weekday}")
+
+    msg = call_gemini(
+        f"今天是{date_str}，幫我寫一則給朋友群的早安問候，"
+        "輕鬆活潑、100字以內、繁體中文，"
+        "可以加上今日小提醒或鼓勵，結尾可以有一個 emoji"
+    ) or f"☀️ 早安！今天是{date_str}，新的一天開始了，加油！"
+
+    push_to_group(msg)
+    print(f"[morning] sent at {today.strftime('%H:%M')}")
+
+
+# ─── APScheduler ──────────────────────────────────────────
+
+def _start_scheduler():
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        import pytz
+        tz = pytz.timezone("Asia/Taipei")
+        scheduler = BackgroundScheduler(timezone=tz)
+        scheduler.add_job(send_morning_greeting, CronTrigger(hour=8, minute=0, timezone=tz))
+        scheduler.start()
+        print("[scheduler] morning greeting scheduled at 08:00 Asia/Taipei")
+    except ImportError:
+        print("[scheduler] apscheduler not installed, skipping")
+    except Exception as e:
+        print(f"[scheduler] failed to start: {e}")
+
+
+_start_scheduler()
 
 
 if __name__ == "__main__":
