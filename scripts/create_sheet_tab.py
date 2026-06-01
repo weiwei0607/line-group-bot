@@ -7,7 +7,7 @@ import os
 import requests
 from goal_tracker import _get_token, GOAL_SHEET_ID
 
-TABS_NEEDED = ["目標", "打卡", "暱稱", "設定", "記憶", "聊天記錄", "個人記憶"]
+TABS_NEEDED = ["目標", "打卡", "暱稱", "設定", "記憶", "聊天記錄", "個人記憶", "積分", "待辦"]
 
 
 def get_existing_tabs(token):

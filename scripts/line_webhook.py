@@ -61,6 +61,7 @@ BOT_NAME = os.environ.get("LINE_BOT_NAME", "日文小老師")
 BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后的小棉襖")
 MEMBERS = ["太后", "毛毛", "二毛"]
 _MEMBER_ZODIACS = {"太后": "雙子", "毛毛": "金牛", "二毛": "魔羯"}
+_MEMBER_BIRTHDAYS = {"太后": "06-07", "毛毛": "04-25", "二毛": "01-04"}
 LINE_GROUP_ID = os.environ.get("LINE_GROUP_ID", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8371746315:AAE4KoTkFAjm48wCXAN8-s3SbMsjxNGD4oM")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8230417743")
@@ -3055,8 +3056,11 @@ def send_morning_greeting():
     except Exception:
         pass
 
-    # 生日
+    # 生日（Sheet 沒資料就用 hardcode）
     birthday_nicks = get_today_birthdays()
+    if not birthday_nicks:
+        today_mmdd = today.strftime("%m-%d")
+        birthday_nicks = [nick for nick, bd in _MEMBER_BIRTHDAYS.items() if bd == today_mmdd]
     birthday_str = f"今天是 {'、'.join(birthday_nicks)} 的生日！" if birthday_nicks else ""
 
     # 節日/特別日（Gemini 判斷）
