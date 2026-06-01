@@ -728,6 +728,22 @@ def fetch_trivia() -> str:
 
 # ─── Cocktail ────────────────────────────────────────────
 
+def _format_cocktail(drink_name: str, category: str, ingredients: list, instructions: str) -> str:
+    ings_str = "、".join(ingredients[:8])
+    zh_steps = call_gemini(
+        f"把以下調酒做法翻成繁體中文，條列步驟，簡潔，不超過150字：\n{instructions}"
+    ) if instructions else ""
+    lines = [f"🍹 {drink_name}"]
+    if category:
+        lines[0] += f"（{category}）"
+    lines.append(f"材料：{ings_str}")
+    if zh_steps:
+        lines.append(f"\n做法：\n{zh_steps}")
+    elif instructions:
+        lines.append(f"做法：{instructions[:300]}")
+    return "\n".join(lines)
+
+
 def fetch_cocktail(name: str = None) -> str:
     params = {"name": name} if name else {}
     d = _ninja("/v1/cocktail", params=params)
@@ -735,20 +751,22 @@ def fetch_cocktail(name: str = None) -> str:
         return _QUOTA_MSG
     if d and isinstance(d, list):
         c = d[0]
-        return (
-            f"🍹 今日調酒：{c.get('name', '')}\n"
-            f"材料：{'、'.join(c.get('ingredients', [])[:5])}\n"
-            f"做法：{(c.get('instructions') or '')[:400]}..."
+        return _format_cocktail(
+            c.get("name", ""), "",
+            c.get("ingredients", []),
+            c.get("instructions", ""),
         )
     # Fallback to TheCocktailDB
     try:
-        r = requests.get("https://www.thecocktaildb.com/api/json/v1/1/random.php", timeout=8)
+        url = "https://www.thecocktaildb.com/api/json/v1/1/random.php"
+        if name:
+            url = f"https://www.thecocktaildb.com/api/json/v1/1/search.php?s={name}"
+        r = requests.get(url, timeout=8)
         drink = r.json()["drinks"][0]
-        ings = [drink.get(f"strIngredient{i}", "") for i in range(1, 8) if drink.get(f"strIngredient{i}")]
-        return (
-            f"🍹 今日調酒：{drink['strDrink']}（{drink.get('strCategory', '')}）\n"
-            f"材料：{'、'.join(ings[:5])}\n"
-            f"做法：{(drink.get('strInstructions') or '')[:400]}..."
+        ings = [drink[f"strIngredient{i}"] for i in range(1, 16) if drink.get(f"strIngredient{i}")]
+        return _format_cocktail(
+            drink["strDrink"], drink.get("strCategory", ""),
+            ings, drink.get("strInstructions", ""),
         )
     except Exception:
         return "🍹 調酒師不在，待會再試"
@@ -756,27 +774,48 @@ def fetch_cocktail(name: str = None) -> str:
 
 # ─── Anime Quotes ────────────────────────────────────────
 
+def _parse_anime_quote(item: dict) -> str | None:
+    quote = item.get("quote") or item.get("content", "")
+    char = item.get("char") or item.get("character", "")
+    anime = item.get("anime") or item.get("title", "")
+    if not quote:
+        return None
+    line = f"🌸 「{quote}」"
+    if char:
+        line += f"\n— {char}"
+    if anime:
+        line += f"《{anime}》"
+    return line
+
+
 def fetch_anime_quote() -> str:
+    # Primary: RapidAPI
     d = _rapid("get", "anime-quotes4.p.rapidapi.com", "/")
-    if d is _QUOTA:
-        return _QUOTA_MSG
-    if not d:
-        return "🌸 動漫語錄暫時失靈，待會再試"
+    if d is not _QUOTA and d:
+        try:
+            item = random.choice(d) if isinstance(d, list) else d
+            result = _parse_anime_quote(item)
+            if result:
+                return result
+        except Exception:
+            pass
+
+    # Fallback: animechan.io (free, no key)
     try:
-        item = random.choice(d) if isinstance(d, list) else d
-        quote = item.get("quote") or item.get("content", "")
-        char = item.get("char") or item.get("character", "")
-        anime = item.get("anime", "")
-        if not quote:
-            return "🌸 動漫語錄暫時失靈，待會再試"
-        line = f"🌸 「{quote}」"
-        if char:
-            line += f"\n— {char}"
-        if anime:
-            line += f"《{anime}》"
-        return line
+        r = requests.get("https://animechan.io/api/v1/quotes/random", timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            item = data.get("data", data)
+            result = _parse_anime_quote(item)
+            if result:
+                return result
     except Exception:
-        return "🌸 動漫語錄暫時失靈，待會再試"
+        pass
+
+    # Last resort: Gemini
+    return call_gemini(
+        "給我一句動漫裡的經典語錄，格式：\n🌸 「語錄」\n— 角色名《作品名》"
+    ) or "🌸 動漫語錄暫時失靈，待會再試"
 
 
 # ─── Random Activity ─────────────────────────────────────
