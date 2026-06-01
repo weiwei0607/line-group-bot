@@ -130,7 +130,7 @@ def _start_scheduler():
                 cron_mark_done("morning_greeting")
             except Exception as e:
                 send_telegram_alert(f"早安提醒失敗：{e}")
-        scheduler.add_job(_safe_morning, CronTrigger(hour=8, minute=0, timezone=tz))
+        scheduler.add_job(_safe_morning, CronTrigger(hour=8, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _weekly_sunday_push():
             from state import cron_is_done, cron_mark_done
@@ -160,7 +160,7 @@ def _start_scheduler():
             except Exception as e:
                 send_telegram_alert(f"週日推播失敗：{e}")
 
-        scheduler.add_job(_weekly_sunday_push, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone=tz))
+        scheduler.add_job(_weekly_sunday_push, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _check_cycle_end():
             from state import cron_is_done, cron_mark_done
@@ -176,7 +176,7 @@ def _start_scheduler():
             except Exception as e:
                 send_telegram_alert(f"週期結束檢查失敗：{e}")
 
-        scheduler.add_job(_check_cycle_end, CronTrigger(hour=22, minute=0, timezone=tz))
+        scheduler.add_job(_check_cycle_end, CronTrigger(hour=22, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _silence_check():
             from state import cron_is_done, cron_mark_done
@@ -197,10 +197,12 @@ def _start_scheduler():
             except Exception as e:
                 send_telegram_alert(f"沉默偵測失敗：{e}")
 
-        scheduler.add_job(_silence_check, CronTrigger(hour=12, minute=0, timezone=tz))
+        scheduler.add_job(_silence_check, CronTrigger(hour=12, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         scheduler.start()
         logging.info("Scheduler started, all jobs scheduled")
+        import atexit
+        atexit.register(lambda: scheduler.shutdown(wait=False))
     except ImportError:
         logging.info("apscheduler not installed, skipping")
     except Exception as e:
@@ -212,4 +214,4 @@ _start_scheduler()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, threaded=True)

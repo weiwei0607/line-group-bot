@@ -98,6 +98,7 @@ def kv_set(key: str, value, ttl_seconds: int | None = None):
                 (key, json.dumps(value, ensure_ascii=False), expires),
             )
             c.commit()
+            _maybe_cleanup()
     except sqlite3.Error as exc:
         logging.warning("state kv_set error: %s", exc)
 
@@ -118,6 +119,29 @@ def kv_cleanup():
             c.commit()
     except sqlite3.Error as exc:
         logging.warning("state kv_cleanup error: %s", exc)
+
+
+def _maybe_cleanup():
+    """Probabilistic cleanup (~1% chance per write) to avoid unbounded growth."""
+    import random
+    if random.random() > 0.01:
+        return
+    try:
+        with _write_lock, _conn() as c:
+            # Expired KV
+            c.execute("DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')")
+            # Old rate_limit entries (window older than 7 days)
+            cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+            c.execute("DELETE FROM rate_limit WHERE window_start <= ?", (cutoff,))
+            # Old chat_memory beyond 100 rows
+            c.execute(
+                "DELETE FROM chat_memory WHERE id <= ("
+                "SELECT id FROM chat_memory ORDER BY id DESC LIMIT 1 OFFSET 100"
+                ")"
+            )
+            c.commit()
+    except sqlite3.Error as exc:
+        logging.warning("state cleanup error: %s", exc)
 
 
 # ─── Domain-specific helpers ──────────────────────────────
@@ -184,6 +208,7 @@ def chat_append(nickname: str, text: str, max_len: int = 20):
                 (max_len,),
             )
             c.commit()
+            _maybe_cleanup()
     except sqlite3.Error as exc:
         logging.warning("state chat_append error: %s", exc)
 
@@ -258,6 +283,7 @@ def rate_limit_check(user_id: str, max_requests: int = 30, window_seconds: int =
                 (user_id, now),
             )
             c.commit()
+            _maybe_cleanup()
             return True
     except sqlite3.Error as exc:
         logging.warning("state rate_limit_check error: %s", exc)
