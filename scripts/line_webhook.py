@@ -28,6 +28,8 @@ from goal_tracker import (
     add_personal_memory, get_personal_memories,
     add_todo, get_todos, complete_todo_by_content,
     get_zodiac, set_zodiac, get_all_zodiacs, set_zodiac_by_nickname,
+    add_quiz_score, get_quiz_scores, get_week_chat_logs,
+    set_birthday_by_nickname, get_today_birthdays,
     GOAL_SHEET_ID, _get_token, _sheets_get, _sheets_append, _sheets_update
 )
 
@@ -60,6 +62,8 @@ BOT_DISPLAY_NAME = os.environ.get("LINE_BOT_DISPLAY_NAME", "毛毛毛毛太后�
 MEMBERS = ["太后", "毛毛", "二毛"]
 _MEMBER_ZODIACS = {"太后": "雙子", "毛毛": "金牛", "二毛": "魔羯"}
 LINE_GROUP_ID = os.environ.get("LINE_GROUP_ID", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8371746315:AAE4KoTkFAjm48wCXAN8-s3SbMsjxNGD4oM")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8230417743")
 
 handler = WebhookHandler(CHANNEL_SECRET)
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -90,6 +94,8 @@ _SKIP_LOG = {
     "去背", "配對星座",
     "配額", "/配額", "api配額", "額度",
     "指令", "說明", "幫助", "help", "功能",
+    "積分", "本週積分", "答題積分", "quiz積分",
+    "本週總結", "週總結", "本週回顧",
 }
 
 
@@ -542,6 +548,67 @@ def _daily_cache_set(key: str, value):
     for k in list(_DAILY_CACHE.keys()):
         if k[1] != date_str:
             del _DAILY_CACHE[k]
+
+
+# ─── Telegram 告警 ────────────────────────────────────────
+
+def send_telegram_alert(msg: str):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": f"🚨 小棉襖 Bot 告警\n{msg}"[:4000]},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
+# ─── Async reply → push helper ────────────────────────────
+
+def _push_messages(msgs: list):
+    if not LINE_GROUP_ID or not msgs:
+        return
+    try:
+        requests.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={"Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
+                     "Content-Type": "application/json"},
+            json={"to": LINE_GROUP_ID, "messages": msgs},
+            timeout=30,
+        )
+    except Exception as e:
+        print(f"[push_msgs] {e}")
+
+
+def _async_push(reply_token: str, placeholder: str, fn, *args):
+    """Reply ⏳ immediately, run fn(*args) in background, push actual result."""
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(reply_token=reply_token,
+                                messages=[TextMessage(text=placeholder)])
+        )
+    def _run():
+        try:
+            result = fn(*args)
+            if isinstance(result, tuple):
+                text_r, img_r = result[0], result[1] if len(result) > 1 else None
+            else:
+                text_r, img_r = result, None
+            msgs = []
+            if text_r:
+                msgs.append({"type": "text", "text": str(text_r)[:4900]})
+            if img_r:
+                msgs.append({"type": "image",
+                             "originalContentUrl": img_r,
+                             "previewImageUrl": img_r})
+            _push_messages(msgs)
+        except Exception as e:
+            print(f"[async_push] {e}")
+            send_telegram_alert(f"async_push 失敗：{e}")
+    threading.Thread(target=_run, daemon=True).start()
+
 
 _LANG_MAP = {
     "日文": "ja", "日語": "ja",
@@ -2243,6 +2310,7 @@ def handle_message(event):
                 "今日運動 / 找運動 [部位]\n"
                 "今日調酒 / 今日調酒 馬丁尼\n"
                 "來一題 → 答 xxx → 答案\n"
+                "積分（本週答題排行）\n"
                 "我好無聊\n"
                 "BMI 165 55\n"
                 "熱量 [食物]\n"
@@ -2277,6 +2345,7 @@ def handle_message(event):
                 "查西文 [單字]\n"
                 "今日西文單字\n"
                 "\n⚙️ 設定\n"
+                "本週總結\n"
                 "叫我 [暱稱]\n"
                 "我是 [星座]（綁定星座，今日運勢自動跑）\n"
                 "@小棉襖 問任何問題\n"
@@ -2335,6 +2404,39 @@ def handle_message(event):
                 reply_text = "\n".join(lines)
             else:
                 reply_text = "還沒有人綁定星座"
+
+        elif m := re.match(r'^!設生日\s+(\S+)\s+(\d{1,2})[/月](\d{1,2})$', text):
+            nick_b, mo, dy = m.group(1), m.group(2).zfill(2), m.group(3).zfill(2)
+            ok = set_birthday_by_nickname(nick_b, f"{mo}-{dy}")
+            reply_text = f"🎂 {nick_b} 生日設為 {mo}/{dy}" if ok else f"找不到暱稱「{nick_b}」"
+
+        # ── 積分榜 ──
+        elif text in ("積分", "本週積分", "答題積分", "quiz積分"):
+            scores = get_quiz_scores()
+            if scores:
+                ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+                lines = ["🏆 本週答題積分："]
+                medals = ["🥇", "🥈", "🥉"]
+                for i, (nick, s) in enumerate(ranked):
+                    m_icon = medals[i] if i < 3 else "  "
+                    lines.append(f"{m_icon} {nick}：{s} 題")
+                reply_text = "\n".join(lines)
+            else:
+                reply_text = "本週還沒有人答對過題目，輸入「來一題」開始！"
+
+        # ── 本週總結 ──
+        elif text in ("本週總結", "週總結", "本週回顧"):
+            logs = get_week_chat_logs()
+            if logs:
+                sample = logs[-80:]
+                chat_text = "\n".join(f"{n}：{m}" for n, m in sample)
+                _async_push(reply_token, "📝 Gemini 整理中...", lambda: call_gemini(
+                    f"以下是朋友群最近一週的聊天記錄（節選）：\n{chat_text}\n\n"
+                    "請用輕鬆幽默的語氣，100字以內，整理這週大家聊了什麼、有什麼有趣的事，繁體中文。"
+                ) or "這週大家都很忙，聊得不多 😅")
+                return
+            else:
+                reply_text = "這週還沒有聊天記錄"
 
         # ── 暱稱登記 ──
         elif nick_match := re.match(r'^叫我\s*(.+)$', text):
@@ -2402,7 +2504,8 @@ def handle_message(event):
 
         # ── 趣味功能 ──
         elif re.search(r'今日運勢|運勢|占卜', text):
-            reply_text = handle_fortune()
+            _async_push(reply_token, "🔮 占星師施法中，請稍候...", fetch_horoscope, text)
+            return
 
         elif re.search(r'誰請客|今天誰請|誰買單|今天誰買', text):
             reply_text = handle_who_pays(text)
@@ -2463,7 +2566,8 @@ def handle_message(event):
             reply_text = fetch_random_movie()
 
         elif re.search(r'今日(牡羊|白羊|金牛|雙子|巨蟹|獅子|處女|天秤|天蠍|射手|摩羯|水瓶|雙魚)', text):
-            reply_text = fetch_horoscope(text)
+            _async_push(reply_token, "🔮 占星師施法中，請稍候...", fetch_horoscope, text)
+            return
 
         # ── 待辦 ──
         elif re.match(r'^提醒(我|\s)', text):
@@ -2555,7 +2659,8 @@ def handle_message(event):
                 correct = state["answer"].lower()
                 if correct in user_ans or user_ans in correct:
                     _QUIZ_STATE.pop(gid)
-                    reply_text = f"🎉 答對了！答案是：{state['answer']}"
+                    new_score = add_quiz_score(member_label)
+                    reply_text = f"🎉 答對了！答案是：{state['answer']}\n{member_label} 本週答對 {new_score} 題！"
                 else:
                     reply_text = "❌ 不對喔，再想想！（傳「答案」放棄）"
 
@@ -2720,15 +2825,19 @@ def handle_message(event):
 
         # ── YouTube 搜尋 ──
         elif m := re.match(r'^找影片\s+(.+)$', text):
-            reply_text = fetch_youtube(m.group(1).strip())
+            _async_push(reply_token, "🎬 搜尋影片中...", fetch_youtube, m.group(1).strip())
+            return
 
         # ── 改寫文案 ──
         elif m := re.match(r'^改寫\s+(.+)$', text, re.DOTALL):
-            reply_text = rewrite_text(m.group(1).strip())
+            _async_push(reply_token, "✍️ 改寫中，請稍候...", rewrite_text, m.group(1).strip())
+            return
 
         # ── 星座配對 ──
         elif m := re.match(r'^配對星座\s+(\S+)\s+(\S+)$', text):
-            reply_text = match_zodiac(m.group(1).strip(), m.group(2).strip())
+            s1, s2 = m.group(1).strip(), m.group(2).strip()
+            _async_push(reply_token, "💫 星座配對計算中...", match_zodiac, s1, s2)
+            return
 
         elif text == "配對星座":
             reply_text = "請傳「配對星座 星座1 星座2」\n例：配對星座 天蠍 金牛"
@@ -2817,11 +2926,15 @@ def handle_audio(event):
             audio_bytes = blob_api.get_message_content(event.message.id)
         except Exception:
             return
-        result = shazam_identify(audio_bytes)
+        # Reply immediately, push result after Shazam finishes
         MessagingApi(api_client).reply_message(
             ReplyMessageRequest(reply_token=reply_token,
-                                messages=[TextMessage(text=result)])
+                                messages=[TextMessage(text="🎵 辨識中，請稍候...")])
         )
+    def _run():
+        result = shazam_identify(audio_bytes)
+        _push_messages([{"type": "text", "text": result}])
+    threading.Thread(target=_run, daemon=True).start()
 
 
 @handler.add(MessageEvent, message=ImageMessageContent)
@@ -2842,23 +2955,22 @@ def handle_image(event):
         # ── 去背 pending flow ──
         if user_id and user_id in _REMOVE_BG_PENDING:
             _REMOVE_BG_PENDING.discard(user_id)
-            result_url = remove_background(img_bytes)
-            if result_url:
-                line_api.reply_message(ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[
-                        TextMessage(text="✅ 去背完成！"),
-                        ImageMessage(
-                            original_content_url=result_url,
-                            preview_image_url=result_url,
-                        ),
-                    ],
-                ))
-            else:
-                line_api.reply_message(ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[TextMessage(text="去背失敗，請稍後再試 😢")],
-                ))
+            line_api.reply_message(ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text="🖼️ 去背處理中，請稍候...")],
+            ))
+            def _do_remove_bg():
+                result_url = remove_background(img_bytes)
+                if result_url:
+                    _push_messages([
+                        {"type": "text", "text": "✅ 去背完成！"},
+                        {"type": "image",
+                         "originalContentUrl": result_url,
+                         "previewImageUrl": result_url},
+                    ])
+                else:
+                    _push_messages([{"type": "text", "text": "去背失敗，請稍後再試 😢"}])
+            threading.Thread(target=_do_remove_bg, daemon=True).start()
             return
 
         # ── NSFW 自動偵測 ──
@@ -2891,6 +3003,14 @@ def handle_join(event):
 @app.route("/health")
 def health():
     return "OK"
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    tb = traceback.format_exc()[-800:]
+    send_telegram_alert(f"Flask 例外：{type(e).__name__}: {e}\n{tb}")
+    return "Internal Server Error", 500
 
 
 # ─── Push helper ──────────────────────────────────────────
@@ -2935,13 +3055,25 @@ def send_morning_greeting():
     except Exception:
         pass
 
+    # 生日
+    birthday_nicks = get_today_birthdays()
+    birthday_str = f"今天是 {'、'.join(birthday_nicks)} 的生日！" if birthday_nicks else ""
+
+    # 節日/特別日（Gemini 判斷）
+    holiday_hint = call_gemini(
+        f"今天是{date_str}，台灣有沒有節日或特別紀念日？"
+        "如果有，只回應節日名稱（例如「端午節」「父親節」）；沒有就回「無」。"
+    ) or "無"
+    holiday_str = "" if "無" in holiday_hint else f"今天是{holiday_hint.strip()}！"
+
     msg = call_gemini(
         f"今天是{date_str}。{weather_info}\n"
+        f"{holiday_str}{birthday_str}\n"
         "幫我寫一則給朋友群的早安問候，"
         "輕鬆活潑、120字以內、繁體中文，"
-        "加入天氣提醒（如果天氣資訊有提供），可以加上今日小建議或鼓勵話語。"
+        "加入天氣提醒，如有節日或生日也自然帶入。"
         "結尾加一個 emoji。不要加大家好。"
-    ) or f"☀️ 早安！今天是{date_str}，{weather_info or '新的一天開始了'}，加油！"
+    ) or f"☀️ 早安！今天是{date_str}，{weather_info or '新的一天開始了'}！{birthday_str}"
 
     push_to_group(msg)
     print(f"[morning] sent at {today.strftime('%H:%M')}")
@@ -2956,7 +3088,12 @@ def _start_scheduler():
         import pytz
         tz = pytz.timezone("Asia/Taipei")
         scheduler = BackgroundScheduler(timezone=tz)
-        scheduler.add_job(send_morning_greeting, CronTrigger(hour=8, minute=0, timezone=tz))
+        def _safe_morning():
+            try:
+                send_morning_greeting()
+            except Exception as e:
+                send_telegram_alert(f"早安提醒失敗：{e}")
+        scheduler.add_job(_safe_morning, CronTrigger(hour=8, minute=0, timezone=tz))
         scheduler.start()
         print("[scheduler] morning greeting scheduled at 08:00 Asia/Taipei")
     except ImportError:

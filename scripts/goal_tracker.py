@@ -652,3 +652,117 @@ def get_last_activity():
         return None
     except Exception:
         return None
+
+
+# ─── Quiz scores ──────────────────────────────────────────
+
+def _week_start() -> str:
+    """Returns Monday's date string of the current week."""
+    now = _now()
+    monday = now - timedelta(days=now.weekday())
+    return monday.strftime("%Y-%m-%d")
+
+
+def add_quiz_score(nickname: str) -> int:
+    """Record a correct quiz answer. Returns new weekly total for this user."""
+    if not GOAL_SHEET_ID:
+        return 0
+    try:
+        token = _get_token()
+        week = _week_start()
+        rows = _sheets_get(token, "積分!A:C")
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 2 and row[0] == week and row[1] == nickname:
+                new_score = int(row[2]) + 1 if len(row) >= 3 else 1
+                _sheets_update(token, f"積分!C{i}", [[new_score]])
+                return new_score
+        _sheets_append(token, "積分!A:C", [[week, nickname, 1]])
+        return 1
+    except Exception:
+        return 0
+
+
+def get_quiz_scores(week: str = None) -> dict:
+    """Returns {nickname: score} for the given week (defaults to current week)."""
+    if not GOAL_SHEET_ID:
+        return {}
+    try:
+        token = _get_token()
+        week = week or _week_start()
+        rows = _sheets_get(token, "積分!A:C")
+        return {
+            row[1]: int(row[2])
+            for row in rows[1:]
+            if len(row) >= 3 and row[0] == week
+        }
+    except Exception:
+        return {}
+
+
+# ─── Weekly chat summary ──────────────────────────────────
+
+def get_week_chat_logs() -> list:
+    """Returns last 7 days of chat logs as [(member, message), ...]"""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        token = _get_token()
+        rows = _sheets_get(token, "聊天記錄!A:C")
+        cutoff = (_now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        result = [
+            (row[1], row[2])
+            for row in rows[1:]
+            if len(row) >= 3 and row[0] >= cutoff
+        ]
+        return result[-300:]
+    except Exception:
+        return []
+
+
+# ─── Birthdays ────────────────────────────────────────────
+
+def set_birthday(user_id: str, birthday: str) -> bool:
+    """Store birthday (MM-DD) in col D of 暱稱 tab."""
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token, rows = _get_nickname_rows()
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 1 and row[0] == user_id:
+                _sheets_update(token, f"暱稱!D{i}", [[birthday]])
+                return True
+        _sheets_append(token, "暱稱!A:D", [[user_id, "", "", birthday]])
+        return True
+    except Exception:
+        return False
+
+
+def set_birthday_by_nickname(nickname: str, birthday: str) -> bool:
+    """Set birthday by nickname."""
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token, rows = _get_nickname_rows()
+        for i, row in enumerate(rows[1:], 2):
+            if len(row) >= 2 and row[1] == nickname:
+                _sheets_update(token, f"暱稱!D{i}", [[birthday]])
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def get_today_birthdays() -> list[str]:
+    """Returns list of nicknames whose birthday is today (MM-DD)."""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        token, rows = _get_nickname_rows()
+        today = _now().strftime("%m-%d")
+        return [
+            row[1]
+            for row in rows[1:]
+            if len(row) >= 4 and row[3] == today and row[1]
+        ]
+    except Exception:
+        return []
