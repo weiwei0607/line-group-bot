@@ -45,6 +45,13 @@ def get_quiz():
         return f"（測驗生成失敗：{e}）"
 
 if __name__ == "__main__":
+    from datetime import datetime, timezone, timedelta
+    from goal_tracker import get_setting, set_setting, TW_TZ
+    today = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+    if get_setting("weekly_quiz_last_run") == today:
+        print(f"Weekly quiz already ran on {today}, skipping.")
+        exit(0)
+
     quiz_content = get_quiz()
 
     message = (
@@ -62,3 +69,4 @@ if __name__ == "__main__":
         data={"chat_id": CHAT_ID, "text": message},
         timeout=10,
     )
+    set_setting("weekly_quiz_last_run", today)

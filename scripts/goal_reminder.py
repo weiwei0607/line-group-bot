@@ -177,6 +177,12 @@ def check_todos():
 
 
 def main():
+    today = _now().strftime("%Y-%m-%d")
+    from goal_tracker import get_setting, set_setting
+    if get_setting("goal_reminder_last_run") == today:
+        print(f"goal_reminder already ran on {today}, skipping.")
+        return
+
     cycle_id, day, total = get_cycle_info()
     sent = []
 
@@ -219,5 +225,6 @@ def main():
     print(f"Day {day}/{total}: sent {sent}")
 
 
+    set_setting("goal_reminder_last_run", today)
 if __name__ == "__main__":
     main()

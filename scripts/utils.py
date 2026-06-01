@@ -40,36 +40,58 @@ def sanitize_input(text: str) -> str:
     return text
 
 
+# ─── Retry helper ─────────────────────────────────────────
+
+def _retry_http(fn, max_retries=3, backoff=2):
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(backoff ** attempt)
+    raise last_exc
+
+
 # ─── Gemini ───────────────────────────────────────────────
 
 def call_gemini(prompt: str, timeout: int = 12) -> str | None:
-    """呼叫 Gemini 2.5 Flash，回傳文字或 None"""
+    """呼叫 Gemini 2.5 Flash，回傳文字或 None（帶 3 次重試）"""
     key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         return None
     prompt = sanitize_input(prompt)
-    try:
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/"
-            f"models/gemini-2.5-flash:generateContent?key={key}"
-        )
-        resp = requests.post(
-            url,
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=timeout,
-        )
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return None
-        parts = candidates[0].get("content", {}).get("parts", [])
-        if not parts:
-            return None
-        return parts[0].get("text", "").strip()
-    except Exception as exc:
-        logging.warning("call_gemini: %s", exc)
-        send_telegram_alert(f"call_gemini failed: {exc}")
-        return None
+    for attempt in range(3):
+        try:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/"
+                f"models/gemini-2.5-flash:generateContent?key={key}"
+            )
+            resp = _retry_http(
+                lambda: requests.post(
+                    url,
+                    json={"contents": [{"parts": [{"text": prompt}]}]},
+                    timeout=timeout,
+                )
+            )
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return None
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if not parts:
+                return None
+            return parts[0].get("text", "").strip()
+        except Exception as exc:
+            logging.warning("call_gemini attempt %s: %s", attempt + 1, exc)
+            if attempt == 2:
+                send_telegram_alert(f"call_gemini failed after 3 retries: {exc}")
+                return None
+            import time
+            time.sleep(2 ** attempt)
+    return None
 
 
 # ─── LINE Push ────────────────────────────────────────────
@@ -87,14 +109,16 @@ def send_line_message(text: str, group_id: str | None = None, mentions: list | N
     if mentions:
         msg["mention"] = {"mentionees": mentions}
     try:
-        requests.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={"to": gid, "messages": [msg]},
-            timeout=10,
+        _retry_http(
+            lambda: requests.post(
+                "https://api.line.me/v2/bot/message/push",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"to": gid, "messages": [msg]},
+                timeout=10,
+            )
         )
     except Exception as exc:
         logging.warning("send_line_message: %s", exc)

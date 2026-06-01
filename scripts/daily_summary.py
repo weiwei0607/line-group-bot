@@ -13,6 +13,12 @@ MEMBERS = ["太后", "毛毛", "二毛"]
 
 def main():
     today = _now().strftime("%Y-%m-%d")
+    from goal_tracker import get_setting, set_setting
+    if get_setting("daily_summary_last_run") == today:
+        print(f"daily_summary already ran on {today}, skipping.")
+        return
+
+    today = _now().strftime("%Y-%m-%d")
     logs = get_today_chat_logs()
 
     if not logs:
@@ -56,5 +62,6 @@ def main():
     print(f"Done ({len(logs)} messages, {len(speakers)} speakers)")
 
 
+    set_setting("daily_summary_last_run", today)
 if __name__ == "__main__":
     main()

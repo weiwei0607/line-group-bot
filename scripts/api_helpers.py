@@ -631,7 +631,7 @@ def fetch_gold_price() -> str:
 
 def fetch_number_fact() -> str:
     try:
-        r = requests.get("http://numbersapi.com/random/trivia", params={"json": "true"}, timeout=8)
+        r = requests.get("https://numbersapi.com/random/trivia", params={"json": "true"}, timeout=8)
         text = r.json().get("text", "")
         if text:
             zh = smart_translate(text)

@@ -22,6 +22,12 @@ FALLBACK_MESSAGES = [
 
 
 def main():
+    today = _now().strftime("%Y-%m-%d")
+    from goal_tracker import get_setting, set_setting
+    if get_setting("silence_check_last_run") == today:
+        print(f"silence_check already ran on {today}, skipping.")
+        return
+
     last = get_last_activity()
     now = datetime.now(TW_TZ)
 
@@ -46,5 +52,6 @@ def main():
     print(f"Sent silence breaker after {hours_since:.1f}h of silence")
 
 
+    set_setting("silence_check_last_run", today)
 if __name__ == "__main__":
     main()

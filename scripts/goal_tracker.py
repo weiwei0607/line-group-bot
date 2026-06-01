@@ -45,45 +45,82 @@ def _get_token():
     return token
 
 
-# ─── Nickname cache (10 min TTL) ─────────────────────────
+# ─── Nickname cache (10 min TTL, max 100 entries) ─────────
 _nickname_cache = {}  # {user_id: (timestamp, nickname_or_None)}
 _NICKNAME_TTL = 600
+_NICKNAME_MAX = 100
 
 # ─── Nickname rows cache (30 sec TTL) ─────────────────────
 _nickname_rows_cache = {}  # {"rows": [...], "ts": timestamp}
 _NICKNAME_ROWS_TTL = 30
 
-# ─── Goals cache (in-process, 5 min TTL) ─────────────────
+# ─── Goals cache (in-process, 5 min TTL, max 50 entries) ──
 _goals_cache = {}  # {cycle_id: (timestamp, {member: [goals]})}
 _GOALS_TTL = 300
+_GOALS_MAX = 50
+
+
+def _trim_cache(cache: dict, max_size: int):
+    if len(cache) > max_size:
+        # Remove oldest entries by timestamp (assuming tuple format (ts, value))
+        sorted_items = sorted(cache.items(), key=lambda x: x[1][0] if isinstance(x[1], tuple) else 0)
+        for k, _ in sorted_items[:len(cache) - max_size]:
+            del cache[k]
 
 
 def _now():
     return datetime.now(TW_TZ)
 
 
+# ─── Retry helper ─────────────────────────────────────────
+
+def _retry_http(fn, max_retries=3, backoff=2):
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(backoff ** attempt)
+    raise last_exc
+
+
 # ─── Sheets helpers ───────────────────────────────────────
 
 def _sheets_get(token, range_):
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{GOAL_SHEET_ID}/values/{range_}"
-    r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    r = _retry_http(
+        lambda: requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    )
     return r.json().get("values", [])
 
 
 def _sheets_append(token, range_, values):
     url = (f"https://sheets.googleapis.com/v4/spreadsheets/{GOAL_SHEET_ID}"
            f"/values/{range_}:append?valueInputOption=USER_ENTERED")
-    requests.post(url,
-                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                  json={"values": values}, timeout=10)
+    _retry_http(
+        lambda: requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"values": values},
+            timeout=10,
+        )
+    )
 
 
 def _sheets_update(token, range_, values):
     url = (f"https://sheets.googleapis.com/v4/spreadsheets/{GOAL_SHEET_ID}"
            f"/values/{range_}?valueInputOption=USER_ENTERED")
-    requests.put(url,
-                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                 json={"values": values}, timeout=10)
+    _retry_http(
+        lambda: requests.put(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"values": values},
+            timeout=10,
+        )
+    )
 
 
 # ─── Cycle logic ──────────────────────────────────────────
@@ -130,8 +167,10 @@ def get_nickname(user_id):
         for row in rows[1:]:
             if len(row) >= 2 and row[0] == user_id:
                 _nickname_cache[user_id] = (time.time(), row[1])
+                _trim_cache(_nickname_cache, _NICKNAME_MAX)
                 return row[1]
         _nickname_cache[user_id] = (time.time(), None)
+        _trim_cache(_nickname_cache, _NICKNAME_MAX)
         return None
     except Exception:
         return None
@@ -160,9 +199,11 @@ def set_nickname(user_id, nickname):
             if len(row) >= 1 and row[0] == user_id:
                 _sheets_update(token, f"暱稱!B{i}", [[nickname]])
                 _nickname_cache[user_id] = (time.time(), nickname)
+                _trim_cache(_nickname_cache, _NICKNAME_MAX)
                 return True
         _sheets_append(token, "暱稱!A:C", [[user_id, nickname, ""]])
         _nickname_cache[user_id] = (time.time(), nickname)
+        _trim_cache(_nickname_cache, _NICKNAME_MAX)
         return True
     except Exception:
         return False
@@ -291,6 +332,7 @@ def get_goals(cycle_id=None) -> dict:
                 goals = [g.strip() for g in row[2].split("/") if g.strip()]
                 result[row[1]] = goals
         _goals_cache[cycle_id] = (time.time(), result)
+        _trim_cache(_goals_cache, _GOALS_MAX)
         return result
     except Exception:
         return {}
@@ -669,21 +711,42 @@ def get_next_cycle_start() -> str:
 
 # ─── Last activity (silence detection) ───────────────────
 
-def update_last_activity():
-    """Store current timestamp as last group activity."""
+def get_setting(key: str, default=None):
+    """Read a key from the 設定 tab."""
     if not GOAL_SHEET_ID:
-        return
+        return default
     try:
         token = _get_token()
-        now_str = _now().strftime("%Y-%m-%d %H:%M:%S")
+        rows = _sheets_get(token, "設定!A:B")
+        for row in rows:
+            if len(row) >= 2 and row[0] == key:
+                return row[1]
+    except Exception:
+        pass
+    return default
+
+
+def set_setting(key: str, value: str) -> bool:
+    """Write a key-value pair to the 設定 tab."""
+    if not GOAL_SHEET_ID:
+        return False
+    try:
+        token = _get_token()
         rows = _sheets_get(token, "設定!A:B")
         for i, row in enumerate(rows, 1):
-            if len(row) >= 1 and row[0] == "last_activity":
-                _sheets_update(token, f"設定!B{i}", [[now_str]])
-                return
-        _sheets_append(token, "設定!A:B", [["last_activity", now_str]])
+            if len(row) >= 1 and row[0] == key:
+                _sheets_update(token, f"設定!B{i}", [[value]])
+                return True
+        _sheets_append(token, "設定!A:B", [[key, value]])
+        return True
     except Exception as _exc:
-        import logging; logging.getLogger(__name__).warning("Silent error: %s", _exc)
+        import logging; logging.getLogger(__name__).warning("set_setting error: %s", _exc)
+    return False
+
+
+def update_last_activity():
+    """Store current timestamp as last group activity."""
+    set_setting("last_activity", _now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 def get_last_activity():
