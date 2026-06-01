@@ -74,27 +74,10 @@ def _now():
 
 # ─── Retry helper ─────────────────────────────────────────
 
+from shared.retry import retry_http
+
 def _retry_http(fn, max_retries=3, backoff=2):
-    last_exc = None
-    for attempt in range(max_retries):
-        try:
-            resp = fn()
-            # If fn returns a Response-like object, validate HTTP status
-            if hasattr(resp, "status_code") and not resp.ok:
-                txt = getattr(resp, "text", "")[:200]
-                last_exc = RuntimeError(f"HTTP {resp.status_code}: {txt}")
-                if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
-                    import time
-                    time.sleep(backoff ** attempt)
-                    continue
-                raise last_exc
-            return resp
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            last_exc = exc
-            if attempt < max_retries - 1:
-                import time
-                time.sleep(backoff ** attempt)
-    raise last_exc
+    return retry_http(max_retries=max_retries, backoff=backoff)(fn)()
 
 
 # ─── Sheets helpers ───────────────────────────────────────
