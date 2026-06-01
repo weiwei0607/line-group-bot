@@ -15,17 +15,11 @@ from shared.security import sanitize_input
 
 # ─── Retry helper ─────────────────────────────────────────
 
+from shared.retry import retry_http
+
+
 def _retry_http(fn, max_retries=3, backoff=2):
-    last_exc = None
-    for attempt in range(max_retries):
-        try:
-            return fn()
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            last_exc = exc
-            if attempt < max_retries - 1:
-                import time
-                time.sleep(backoff ** attempt)
-    raise last_exc
+    return retry_http(max_retries=max_retries, backoff=backoff)(fn)()
 
 
 # ─── Gemini ───────────────────────────────────────────────
@@ -105,17 +99,9 @@ def push_to_group(text: str) -> None:
 
 # ─── Telegram Alert ───────────────────────────────────────
 
+from shared.alerts import send_telegram_alert as _send_telegram_alert_raw
+
+
 def send_telegram_alert(msg: str) -> None:
     """發送 Telegram 告警給管理員"""
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not bot_token or not chat_id:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            data={"chat_id": chat_id, "text": f"🚨 Bot Alert\n\n{msg}"},
-            timeout=10,
-        )
-    except Exception as exc:
-        logging.warning("send_telegram_alert: %s", exc)
+    return _send_telegram_alert_raw(msg, prefix="🚨 Bot Alert")
