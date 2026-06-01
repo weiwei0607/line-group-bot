@@ -38,8 +38,8 @@ from weather import (
     fetch_cat_image, fetch_dog_image, fetch_fox_image,
     fetch_shiba_image, fetch_animal_image, fetch_nasa_apod,
     fetch_random_pokemon, fetch_advice, handle_joke,
-    handle_fun_fact, fetch_random_meal,
-    fetch_news, get_weather_v2, handle_who_pays,
+    handle_fun_fact,
+    get_weather_v2, handle_who_pays,
     handle_draw_lots, handle_countdown, handle_fortune,
     _parse_date_offset, send_morning_greeting,
 )
