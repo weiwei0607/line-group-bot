@@ -220,6 +220,14 @@ _REGEX_DISPATCH = [
 ]
 
 
+def _push_messages(messages: list):
+    """Push messages to the default group."""
+    gid = os.environ.get("LINE_GROUP_ID", "")
+    if gid:
+        from line_push import push_messages
+        push_messages(gid, messages)
+
+
 def handle_message(event):
     text = event.message.text.strip()
     reply_token = event.reply_token
