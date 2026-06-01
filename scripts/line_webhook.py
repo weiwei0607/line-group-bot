@@ -1,11 +1,61 @@
 import os
 import logging
+import json
 import time
 import uuid
+import threading
 from datetime import datetime, timedelta
+from collections import defaultdict
 from goal_tracker import TW_TZ
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+class _JsonFormatter(logging.Formatter):
+    def format(self, record):
+        obj = {
+            "ts": datetime.fromtimestamp(record.created, TW_TZ).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if hasattr(record, "req_id"):
+            obj["req_id"] = record.req_id
+        if record.exc_info:
+            obj["exc"] = self.formatException(record.exc_info)
+        return json.dumps(obj, ensure_ascii=False, default=str)
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
+
+# ── Performance metrics ───────────────────────────────────────────
+class _Metrics:
+    def __init__(self, max_samples=5000):
+        self._lock = threading.Lock()
+        self._max = max_samples
+        self._data = defaultdict(list)  # endpoint -> [dur_ms, ...]
+
+    def record(self, endpoint: str, dur_ms: float):
+        with self._lock:
+            arr = self._data[endpoint]
+            arr.append(dur_ms)
+            if len(arr) > self._max:
+                self._data[endpoint] = arr[-self._max:]
+
+    def snapshot(self):
+        with self._lock:
+            out = {}
+            for ep, arr in self._data.items():
+                s = sorted(arr)
+                n = len(s)
+                out[ep] = {
+                    "n": n,
+                    "p50": s[n // 2] if n else 0,
+                    "p95": s[int(n * 0.95)] if n else 0,
+                    "p99": s[int(n * 0.99)] if n else 0,
+                    "max": s[-1] if n else 0,
+                }
+            return out
+
+_METRICS = _Metrics()
 from flask import Flask, request, abort, g
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -61,11 +111,15 @@ def _before_request():
 @app.after_request
 def _after_request(response):
     duration_ms = (time.time() - g.start_time) * 1000
+    extra = {"req_id": g.request_id}
     logger.info(
         "[req:%s] %s %s -> %d in %.1fms",
         g.request_id, request.method, request.path,
         response.status_code, duration_ms,
+        extra=extra,
     )
+    endpoint = f"{request.method} {request.path}"
+    _METRICS.record(endpoint, duration_ms)
     return response
 
 @app.route("/callback", methods=["POST"])
@@ -125,6 +179,10 @@ def health():
     all_ok = all(v == "ok" for v in checks.values())
     status = 200 if all_ok else 503
     return checks, status
+
+@app.route("/metrics")
+def metrics():
+    return {"metrics": _METRICS.snapshot()}
 
 def handle_exception(e):
     import traceback
