@@ -126,6 +126,7 @@ def send_line_message(text):
             "Content-Type": "application/json",
         },
         json={"to": GROUP_ID, "messages": [{"type": "text", "text": text}]},
+        timeout=10,
     )
 
 # 發送群組互動訊息
