@@ -43,7 +43,10 @@ from weather import (
     handle_draw_lots, handle_countdown, handle_fortune,
     _parse_date_offset, send_morning_greeting,
 )
-from horoscope import fetch_horoscope
+from horoscope import (
+    fetch_horoscope, fetch_news, fetch_random_meal,
+    fetch_random_movie, shazam_identify, remove_background, check_nsfw,
+)
 from line_push import push_messages, push_text
 
 
