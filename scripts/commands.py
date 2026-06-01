@@ -22,6 +22,7 @@ from goal_tracker import (
     get_zodiac, set_zodiac, get_all_zodiacs, set_zodiac_by_nickname,
     add_quiz_score, get_quiz_scores, get_week_chat_logs,
     set_birthday_by_nickname, get_today_birthdays,
+    get_all_nicknames, get_user_id_by_nickname,
 )
 
 from api_helpers import *
@@ -197,6 +198,24 @@ def handle_message(event):
                 reply_text = "\n".join(lines)
             else:
                 reply_text = "還沒有人綁定星座"
+
+        elif text == "!查暱稱":
+            nicks = get_all_nicknames()
+            if nicks:
+                lines = ["👤 已登記暱稱："]
+                for uid, nick in nicks:
+                    lines.append(f"  {nick}：{uid}")
+                reply_text = "\n".join(lines)
+            else:
+                reply_text = "還沒有人登記暱稱"
+
+        elif m := re.match(r'^!設暱稱\s+(\S+)\s+(.+)$', text):
+            nick_target, uid = m.group(1).strip(), m.group(2).strip()
+            if uid.startswith("U") and len(uid) > 10:
+                ok = set_nickname(uid, nick_target)
+                reply_text = f"✅ 已將 {uid} 設為「{nick_target}」" if ok else "設定失敗 😢"
+            else:
+                reply_text = f"userId 格式不對：{uid}（應該是 U 開頭的長字串）"
 
         elif m := re.match(r'^!設生日\s+(\S+)\s+(\d{1,2})[/月](\d{1,2})$', text):
             nick_b, mo, dy = m.group(1), m.group(2).zfill(2), m.group(3).zfill(2)

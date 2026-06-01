@@ -215,6 +215,21 @@ def get_all_zodiacs() -> list[tuple[str, str, str]]:
         return []
 
 
+def get_all_nicknames() -> list[tuple[str, str]]:
+    """Returns list of (user_id, nickname) for all registered members."""
+    if not GOAL_SHEET_ID:
+        return []
+    try:
+        _, rows = _get_nickname_rows()
+        result = []
+        for row in rows[1:]:
+            if len(row) >= 2 and row[1]:
+                result.append((row[0], row[1]))
+        return result
+    except Exception:
+        return []
+
+
 # ─── Goals ────────────────────────────────────────────────
 
 def set_goals(member, goals: list, cycle_id: str | None = None) -> bool:

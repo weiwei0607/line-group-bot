@@ -72,16 +72,24 @@ def build_midcycle_reminder(cycle_id, day, total):
     all_members = sorted(set(list(goals.keys()) + list(stats.keys()) + MEMBERS))
 
     lines = [f"📣 十日目標中期提醒（第 {day}/{total} 天）\n"]
+    mentions = []
     for member in all_members:
         count = len(stats.get(member, []))
         bar = "🟩" * count + "⬜" * (day - count)
         status = "✅" if count >= day // 2 else "⚠️"
-        lines.append(f"{status} {member}：{bar} {count}/{day} 天")
+        user_id = get_user_id_by_nickname(member)
+        behind = count < day // 2 or not goals.get(member)
+        if user_id and behind:
+            idx = len("\n".join(lines) + "\n") if lines else 0
+            lines.append(f"{status} @{member}：{bar} {count}/{day} 天")
+            mentions.append({"index": idx, "length": len(member) + 1, "userId": user_id})
+        else:
+            lines.append(f"{status} {member}：{bar} {count}/{day} 天")
         if not goals.get(member):
             lines.append("   （還沒設目標！快去設）")
 
     lines.append("\n後半段加油！目標就在前方 💪")
-    return "\n".join(lines)
+    return "\n".join(lines), mentions
 
 
 def build_final_reminder(cycle_id, day, total):
@@ -90,12 +98,20 @@ def build_final_reminder(cycle_id, day, total):
     all_members = sorted(set(list(goals.keys()) + list(stats.keys()) + MEMBERS))
 
     lines = [f"⚡ 最後衝刺！週期還剩 {total - day + 1} 天\n"]
+    mentions = []
     for member in all_members:
         count = len(stats.get(member, []))
         bar = "🟩" * count + "⬜" * (total - count)
-        lines.append(f"  {member}：{bar} {count}/{total}")
+        user_id = get_user_id_by_nickname(member)
+        behind = count < total or not goals.get(member)
+        if user_id and behind:
+            idx = len("\n".join(lines) + "\n") if lines else 0
+            lines.append(f"  @{member}：{bar} {count}/{total}")
+            mentions.append({"index": idx, "length": len(member) + 1, "userId": user_id})
+        else:
+            lines.append(f"  {member}：{bar} {count}/{total}")
     lines.append("\n還沒打卡的趕快補！🏃")
-    return "\n".join(lines)
+    return "\n".join(lines), mentions
 
 
 def build_next_cycle_reminder():
@@ -111,14 +127,21 @@ def build_day1_reminder(cycle_id, total):
     goals = get_goals(cycle_id)
     missing = [m for m in MEMBERS if m not in goals]
     if not missing:
-        return None
-    missing_str = " / ".join(missing)
-    return (
-        f"🎯 新的十日週期開始！（共 {total} 天）\n\n"
-        f"⚠️ {missing_str} 還沒設目標！\n\n"
-        f"指令：設目標：目標1 / 目標2 / 目標3\n"
-        f"趁現在想清楚這十天要做什麼 💪"
-    )
+        return None, []
+    lines = [f"🎯 新的十日週期開始！（共 {total} 天）\n"]
+    mentions = []
+    for m in missing:
+        user_id = get_user_id_by_nickname(m)
+        if user_id:
+            idx = len("\n".join(lines) + "\n") if lines else 0
+            lines.append(f"@{m} 還沒設目標！")
+            mentions.append({"index": idx, "length": len(m) + 1, "userId": user_id})
+        else:
+            lines.append(f"⚠️ {m} 還沒設目標！")
+    lines.append("")
+    lines.append("指令：設目標：目標1 / 目標2 / 目標3")
+    lines.append("趁現在想清楚這十天要做什麼 💪")
+    return "\n".join(lines), mentions
 
 
 def check_todos():
@@ -159,9 +182,9 @@ def main():
 
     # 第 1 天：催未設目標的人
     if day == 1:
-        day1_msg = build_day1_reminder(cycle_id, total)
+        day1_msg, day1_mentions = build_day1_reminder(cycle_id, total)
         if day1_msg:
-            send_line_message(day1_msg)
+            send_line_message(day1_msg, mentions=day1_mentions)
             sent.append("day1 goal reminder")
 
     # 每天都發：今日打卡提醒
@@ -172,12 +195,14 @@ def main():
 
     # 第 5 天額外發：中期提醒
     if day == 5:
-        send_line_message(build_midcycle_reminder(cycle_id, day, total))
+        mid_msg, mid_mentions = build_midcycle_reminder(cycle_id, day, total)
+        send_line_message(mid_msg, mentions=mid_mentions)
         sent.append("mid-cycle reminder")
 
     # 倒數第 2 天：最後衝刺 + 提醒設下輪目標
     elif day == total - 1 and total > 3:
-        send_line_message(build_final_reminder(cycle_id, day, total))
+        final_msg, final_mentions = build_final_reminder(cycle_id, day, total)
+        send_line_message(final_msg, mentions=final_mentions)
         send_line_message(build_next_cycle_reminder())
         sent.append("final sprint reminder + next cycle")
 
