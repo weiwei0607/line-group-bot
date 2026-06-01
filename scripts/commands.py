@@ -25,6 +25,7 @@ from goal_tracker import (
 )
 
 from api_helpers import *
+from dispatch import try_dispatch
 
 # LINE messaging configuration (local copy to avoid circular imports)
 _configuration = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))
@@ -292,7 +293,6 @@ def handle_message(event):
                 reply_text = "\n".join(lines)
 
         # ── Simple dispatch (fast path for stateless commands) ──
-        from dispatch import try_dispatch
         disp_text, disp_img = try_dispatch(text)
         if disp_text is not None:
             if disp_img:
