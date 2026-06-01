@@ -66,6 +66,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ─── 翻譯快取（減少重複 API 呼叫）────────────────────────
+
+_TRANSLATE_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+_TRANSLATE_CACHE_MAX = 500
+_TRANSLATE_CACHE_TTL = 3600
+
+
+def _translate_cache_get(text: str, target: str) -> str | None:
+    key = (text.strip().lower(), target)
+    entry = _TRANSLATE_CACHE.get(key)
+    if entry and time.time() - entry[1] < _TRANSLATE_CACHE_TTL:
+        return entry[0]
+    return None
+
+
+def _translate_cache_set(text: str, target: str, result: str):
+    key = (text.strip().lower(), target)
+    _TRANSLATE_CACHE[key] = (result, time.time())
+    if len(_TRANSLATE_CACHE) > _TRANSLATE_CACHE_MAX:
+        _TRANSLATE_CACHE.pop(next(iter(_TRANSLATE_CACHE)))
+
+
 # ─── 智慧翻譯：RapidAPI 為主，Gemini 為 fallback ───────────
 
 def smart_translate(text: str, target: str = "zh-TW") -> str:
@@ -75,6 +97,9 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
     # 已經是中文直接回傳
     if any(ord(c) > 127 for c in text[:30]):
         return text
+    cached = _translate_cache_get(text, target)
+    if cached is not None:
+        return cached
     # 1. 嘗試 OpenL Translate
     try:
         tl = target.split("-")[0] if "-" in target else target
@@ -122,7 +147,9 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
         pass
     # 3. Fallback 到 Gemini
     result = call_gemini(f"翻成繁體中文，只給翻譯結果：{text}")
-    return result or text
+    result = result or text
+    _translate_cache_set(text, target, result)
+    return result
 
 
 # ─── LINE helpers ─────────────────────────────────────────
