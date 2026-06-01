@@ -521,7 +521,8 @@ def _ninja(path: str, **kwargs):
 # ─── Translation ──────────────────────────────────────────
 
 _TRANSLATE_PENDING: dict = {}
-_QUIZ_STATE: dict = {}  # group_id -> {question, answer}
+_QUIZ_STATE: dict = {}  # group_id -> {question, answer, options?, correct_letter?}
+_VOTE_STATE: dict = {}  # group_id -> {question, options: list, votes: {nick: option}, ts}
 
 # ─── 短期對話記憶 ──────────────────────────────────────────
 _CHAT_MEMORY: deque = deque(maxlen=20)  # (nickname, text) tuples, rolling window
@@ -1772,6 +1773,13 @@ _ZODIAC = {
 _ZODIAC_ZH = {v: k for k, v in _ZODIAC.items()}
 
 
+_RASHI_MAP = {
+    "aries": "mesha", "taurus": "vrsabha", "gemini": "mithuna",
+    "cancer": "karka", "leo": "simha", "virgo": "kanya",
+    "libra": "tula", "scorpio": "vrschika", "sagittarius": "dhanu",
+    "capricorn": "makara", "aquarius": "kumbha", "pisces": "mina",
+}
+
 def _fetch_horoscope_aztro(sign_en: str) -> dict | None:
     try:
         r = requests.post(
@@ -1786,6 +1794,67 @@ def _fetch_horoscope_aztro(sign_en: str) -> dict | None:
     except Exception:
         return None
 
+def _fetch_horoscope_advanced(sign_en: str) -> dict | None:
+    try:
+        key = _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else ""
+        if not key:
+            return None
+        r = requests.get(
+            "https://daily-horoscope-advanced-api.p.rapidapi.com/api/Daily-Horoscope-New/",
+            headers={"x-rapidapi-host": "daily-horoscope-advanced-api.p.rapidapi.com", "x-rapidapi-key": key},
+            params={"zodiacSign": sign_en.capitalize(), "timePeriod": "today"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            d = r.json()
+            return {"prediction": d.get("prediction", ""), "source": "Advanced"}
+    except Exception:
+        pass
+    return None
+
+def _fetch_horoscope_basic(sign_en: str) -> dict | None:
+    try:
+        key = _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else ""
+        if not key:
+            return None
+        r = requests.get(
+            "https://daily-horoscope-api.p.rapidapi.com/api/Daily-Horoscope-English/",
+            headers={"x-rapidapi-host": "daily-horoscope-api.p.rapidapi.com", "x-rapidapi-key": key},
+            params={"zodiacSign": sign_en.capitalize(), "timePeriod": "today"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            d = r.json()
+            return {
+                "prediction": d.get("prediction", ""),
+                "color": d.get("color", "").split(",")[0].strip() if d.get("color") else "",
+                "number": d.get("number", "").split(",")[0].strip() if d.get("number") else "",
+                "source": "Basic",
+            }
+    except Exception:
+        pass
+    return None
+
+def _fetch_horoscope_rashifal(sign_en: str) -> dict | None:
+    try:
+        key = _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else ""
+        if not key:
+            return None
+        rashi = _RASHI_MAP.get(sign_en)
+        if not rashi:
+            return None
+        r = requests.get(
+            "https://zodiac-horoscope-api-rashifal.p.rapidapi.com/astro/rashi/daily",
+            headers={"x-rapidapi-host": "zodiac-horoscope-api-rashifal.p.rapidapi.com", "x-rapidapi-key": key},
+            params={"rashi": rashi, "day": "today", "lang": "en"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            d = r.json()
+            return {"prediction": d.get("desc", ""), "source": "Rashifal"}
+    except Exception:
+        pass
+    return None
 
 def _fetch_horoscope_v2(sign_en: str) -> dict | None:
     d = _rapid("get", "horoscope-astrology.p.rapidapi.com", "/today",
@@ -1800,12 +1869,16 @@ def fetch_horoscope_for_sign(sign_zh: str) -> str:
     sign_en = _ZODIAC.get(sign_zh)
     if not sign_en:
         return f"不認識「{sign_zh}」座"
-    data = _fetch_horoscope_aztro(sign_en) or _fetch_horoscope_v2(sign_en)
+    data = (_fetch_horoscope_advanced(sign_en)
+            or _fetch_horoscope_basic(sign_en)
+            or _fetch_horoscope_rashifal(sign_en)
+            or _fetch_horoscope_aztro(sign_en)
+            or _fetch_horoscope_v2(sign_en))
     if data:
         desc_en = data.get("description") or data.get("horoscope") or data.get("prediction", "")
         mood = data.get("mood", "")
         color = data.get("color", "")
-        lucky = data.get("lucky_number", "") or data.get("luckyNumber", "")
+        lucky = data.get("lucky_number", "") or data.get("luckyNumber", "") or data.get("number", "")
         compat_raw = data.get("compatibility", "") or data.get("luckySign", "")
         compat = _ZODIAC_ZH.get(str(compat_raw).lower(), compat_raw)
         if desc_en:
@@ -1862,7 +1935,11 @@ def fetch_horoscope(text) -> str:
     sign_en = _ZODIAC[sign_zh]
 
     # 嘗試多個 API 輪班
-    data = _fetch_horoscope_aztro(sign_en) or _fetch_horoscope_v2(sign_en)
+    data = (_fetch_horoscope_advanced(sign_en)
+            or _fetch_horoscope_basic(sign_en)
+            or _fetch_horoscope_rashifal(sign_en)
+            or _fetch_horoscope_aztro(sign_en)
+            or _fetch_horoscope_v2(sign_en))
 
     if data:
         desc_en = data.get("description") or data.get("horoscope") or data.get("prediction", "")
