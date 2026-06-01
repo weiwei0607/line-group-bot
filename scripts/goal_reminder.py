@@ -13,7 +13,7 @@ from goal_tracker import (
     get_cycle_info, get_checkin_stats, get_goals,
     get_today_checkins, build_summary_text, get_next_cycle_start,
     get_todos_by_date, get_overdue_todos, TW_TZ,
-    get_user_id_by_nickname,
+    get_user_id_by_nickname, _now,
 )
 from utils import send_line_message
 from config import MEMBERS

@@ -2,7 +2,16 @@
 import os
 import random
 import requests
+import logging
+from datetime import datetime
 from weather import _rapid
+from config import TMDB_API_KEY, RAPIDAPI_KEYS, _MEMBER_ZODIACS
+from goal_tracker import TW_TZ, get_all_zodiacs
+from utils import call_gemini, smart_translate
+from state import _daily_cached, _daily_cache_set
+from weather import _QUOTA, _QUOTA_MSG
+
+logger = logging.getLogger(__name__)
 
 _ZODIAC_EN = {
     "牡羊": "aries", "金牛": "taurus", "雙子": "gemini",
@@ -198,7 +207,7 @@ def _fetch_horoscope_aztro(sign_en: str) -> dict | None:
     try:
         r = requests.post(
             f"https://aztro.p.rapidapi.com/?sign={sign_en}&day=today",
-            headers={"X-RapidAPI-Key": _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else "",
+            headers={"X-RapidAPI-Key": RAPIDAPI_KEYS[0] if RAPIDAPI_KEYS else "",
                      "X-RapidAPI-Host": "aztro.p.rapidapi.com"},
             timeout=8,
         )
@@ -211,7 +220,7 @@ def _fetch_horoscope_aztro(sign_en: str) -> dict | None:
 
 def _fetch_horoscope_advanced(sign_en: str) -> dict | None:
     try:
-        key = _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else ""
+        key = RAPIDAPI_KEYS[0] if RAPIDAPI_KEYS else ""
         if not key:
             return None
         r = requests.get(
@@ -230,7 +239,7 @@ def _fetch_horoscope_advanced(sign_en: str) -> dict | None:
 
 def _fetch_horoscope_basic(sign_en: str) -> dict | None:
     try:
-        key = _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else ""
+        key = RAPIDAPI_KEYS[0] if RAPIDAPI_KEYS else ""
         if not key:
             return None
         r = requests.get(
@@ -254,7 +263,7 @@ def _fetch_horoscope_basic(sign_en: str) -> dict | None:
 
 def _fetch_horoscope_rashifal(sign_en: str) -> dict | None:
     try:
-        key = _RAPIDAPI_KEYS[0] if _RAPIDAPI_KEYS else ""
+        key = RAPIDAPI_KEYS[0] if RAPIDAPI_KEYS else ""
         if not key:
             return None
         rashi = _RASHI_MAP.get(sign_en)

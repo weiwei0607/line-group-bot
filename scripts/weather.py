@@ -2,10 +2,21 @@
 import os
 import re
 import requests
+import logging
+import random
 from collections import deque
 from datetime import datetime, timedelta
-from goal_tracker import TW_TZ
-from config import MEMBERS
+from goal_tracker import TW_TZ, get_today_birthdays
+from config import (
+    MEMBERS, NASA_API_KEY, OWM_API_KEY, LINE_GROUP_ID,
+    RAPIDAPI_KEYS, NINJA_KEYS,
+    _MEMBER_BIRTHDAYS, _MEMBER_ZODIACS,
+)
+from utils import call_gemini
+from shared.alerts import send_telegram_alert
+from line_push import push_messages, push_text
+
+logger = logging.getLogger(__name__)
 
 # ─── Weather ──────────────────────────────────────────────
 
@@ -425,12 +436,12 @@ _ninja_idx = 0   # round-robin index for API Ninjas keys
 
 def _rapid(method: str, host: str, path: str, **kwargs):
     global _rapid_idx
-    if not _RAPIDAPI_KEYS:
+    if not RAPIDAPI_KEYS:
         return None
     extra_headers = kwargs.pop("headers", {})
-    n = len(_RAPIDAPI_KEYS)
+    n = len(RAPIDAPI_KEYS)
     for attempt in range(n):
-        key = _RAPIDAPI_KEYS[(_rapid_idx + attempt) % n]
+        key = RAPIDAPI_KEYS[(_rapid_idx + attempt) % n]
         headers = {"x-rapidapi-key": key, "x-rapidapi-host": host, **extra_headers}
         try:
             r = getattr(requests, method)(
@@ -451,11 +462,11 @@ def _rapid(method: str, host: str, path: str, **kwargs):
 
 def _ninja(path: str, **kwargs):
     global _ninja_idx
-    if not _NINJA_KEYS:
+    if not NINJA_KEYS:
         return _rapid("get", "api-ninjas.p.rapidapi.com", path, **kwargs)
-    n = len(_NINJA_KEYS)
+    n = len(NINJA_KEYS)
     for attempt in range(n):
-        key = _NINJA_KEYS[(_ninja_idx + attempt) % n]
+        key = NINJA_KEYS[(_ninja_idx + attempt) % n]
         try:
             r = requests.get(
                 f"https://api.api-ninjas.com{path}",

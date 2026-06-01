@@ -6,7 +6,7 @@
 import os
 import random
 from datetime import datetime, timezone, timedelta
-from goal_tracker import get_last_activity, TW_TZ
+from goal_tracker import get_last_activity, TW_TZ, _now
 from utils import call_gemini, send_line_message
 
 SILENCE_HOURS = int(os.environ.get("SILENCE_HOURS", "48"))
