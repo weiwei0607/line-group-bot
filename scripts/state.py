@@ -6,15 +6,21 @@ Replaces in-memory dicts/deques so state survives Render restarts.
 import os
 import json
 import sqlite3
+import threading
+import logging
 from datetime import datetime, timedelta
-from collections import deque
 
 DB_PATH = os.environ.get("STATE_DB_PATH", "/tmp/bot_state.db")
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
+_write_lock = threading.Lock()
+
 
 def _conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
 
 
 def _init():
@@ -34,6 +40,13 @@ def _init():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS rate_limit (
+                user_id TEXT PRIMARY KEY,
+                count INTEGER DEFAULT 0,
+                window_start TIMESTAMP
+            )
+        """)
         c.commit()
 
 
@@ -42,46 +55,61 @@ _init()
 # ─── Generic KV ───────────────────────────────────────────
 
 def kv_get(key: str, default=None):
-    with _conn() as c:
-        row = c.execute(
-            "SELECT value FROM kv WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
-            (key, datetime.now().isoformat()),
-        ).fetchone()
-        if row:
-            try:
-                return json.loads(row[0])
-            except Exception:
-                return row[0]
-        return default
+    try:
+        with _conn() as c:
+            row = c.execute(
+                "SELECT value FROM kv WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)",
+                (key, datetime.now().isoformat()),
+            ).fetchone()
+            if row:
+                try:
+                    return json.loads(row[0])
+                except (json.JSONDecodeError, TypeError):
+                    return row[0]
+    except sqlite3.Error as exc:
+        logging.warning("state kv_get error: %s", exc)
+    return default
 
 
 def kv_set(key: str, value, ttl_seconds: int | None = None):
     expires = None
     if ttl_seconds:
         expires = (datetime.now() + timedelta(seconds=ttl_seconds)).isoformat()
-    with _conn() as c:
-        c.execute(
-            "INSERT INTO kv (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires_at=excluded.expires_at",
-            (key, json.dumps(value, ensure_ascii=False), expires),
-        )
-        c.commit()
+    try:
+        with _write_lock, _conn() as c:
+            c.execute(
+                "INSERT INTO kv (key, value, expires_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires_at=excluded.expires_at",
+                (key, json.dumps(value, ensure_ascii=False), expires),
+            )
+            c.commit()
+    except sqlite3.Error as exc:
+        logging.warning("state kv_set error: %s", exc)
 
 
 def kv_delete(key: str):
-    with _conn() as c:
-        c.execute("DELETE FROM kv WHERE key = ?", (key,))
-        c.commit()
+    try:
+        with _write_lock, _conn() as c:
+            c.execute("DELETE FROM kv WHERE key = ?", (key,))
+            c.commit()
+    except sqlite3.Error as exc:
+        logging.warning("state kv_delete error: %s", exc)
 
 
 def kv_cleanup():
-    with _conn() as c:
-        c.execute("DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at <= ?", (datetime.now().isoformat(),))
-        c.commit()
+    try:
+        with _write_lock, _conn() as c:
+            c.execute(
+                "DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at <= ?",
+                (datetime.now().isoformat(),),
+            )
+            c.commit()
+    except sqlite3.Error as exc:
+        logging.warning("state kv_cleanup error: %s", exc)
 
 
 # ─── Domain-specific helpers ──────────────────────────────
 
-# Quiz state
 def quiz_get(group_id: str):
     return kv_get(f"quiz:{group_id}")
 
@@ -94,7 +122,6 @@ def quiz_delete(group_id: str):
     kv_delete(f"quiz:{group_id}")
 
 
-# Vote state
 def vote_get(group_id: str):
     return kv_get(f"vote:{group_id}")
 
@@ -107,7 +134,6 @@ def vote_delete(group_id: str):
     kv_delete(f"vote:{group_id}")
 
 
-# Translate pending
 def translate_get(user_id: str):
     return kv_get(f"translate:{user_id}")
 
@@ -120,7 +146,6 @@ def translate_delete(user_id: str):
     kv_delete(f"translate:{user_id}")
 
 
-# Remove BG pending
 def remove_bg_get(user_id: str) -> bool:
     return kv_get(f"remove_bg:{user_id}", False)
 
@@ -132,27 +157,37 @@ def remove_bg_set(user_id: str, flag: bool = True):
         kv_delete(f"remove_bg:{user_id}")
 
 
-# Chat memory
+# ─── Chat memory ──────────────────────────────────────────
+
 def chat_append(nickname: str, text: str, max_len: int = 20):
-    with _conn() as c:
-        c.execute("INSERT INTO chat_memory (nickname, text) VALUES (?, ?)", (nickname, text))
-        # Keep only last max_len rows
-        c.execute(
-            "DELETE FROM chat_memory WHERE id <= (SELECT id FROM chat_memory ORDER BY id DESC LIMIT 1 OFFSET ?)",
-            (max_len,),
-        )
-        c.commit()
+    try:
+        with _write_lock, _conn() as c:
+            c.execute("INSERT INTO chat_memory (nickname, text) VALUES (?, ?)", (nickname, text))
+            c.execute(
+                "DELETE FROM chat_memory WHERE id <= ("
+                "SELECT id FROM chat_memory ORDER BY id DESC LIMIT 1 OFFSET ?"
+                ")",
+                (max_len,),
+            )
+            c.commit()
+    except sqlite3.Error as exc:
+        logging.warning("state chat_append error: %s", exc)
 
 
 def chat_get(n: int = 8):
-    with _conn() as c:
-        rows = c.execute(
-            "SELECT nickname, text FROM chat_memory ORDER BY id DESC LIMIT ?", (n,)
-        ).fetchall()
-        return list(reversed(rows))
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT nickname, text FROM chat_memory ORDER BY id DESC LIMIT ?", (n,)
+            ).fetchall()
+            return list(reversed(rows))
+    except sqlite3.Error as exc:
+        logging.warning("state chat_get error: %s", exc)
+        return []
 
 
-# Daily cache
+# ─── Daily cache ──────────────────────────────────────────
+
 def daily_get(key: str, date_str: str | None = None):
     if date_str is None:
         from goal_tracker import TW_TZ
@@ -169,3 +204,43 @@ def daily_set(key: str, value, date_str: str | None = None):
 
 def daily_cleanup():
     kv_cleanup()
+
+
+# ─── Rate limiting ────────────────────────────────────────
+
+def rate_limit_check(user_id: str, max_requests: int = 30, window_seconds: int = 60) -> bool:
+    """Return True if user is allowed, False if rate-limited."""
+    now = datetime.now().isoformat()
+    window_start = (datetime.now() - timedelta(seconds=window_seconds)).isoformat()
+    try:
+        with _write_lock, _conn() as c:
+            row = c.execute(
+                "SELECT count, window_start FROM rate_limit WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if row:
+                count, ws = row
+                if ws and ws < window_start:
+                    c.execute(
+                        "UPDATE rate_limit SET count = 1, window_start = ? WHERE user_id = ?",
+                        (now, user_id),
+                    )
+                    c.commit()
+                    return True
+                if count >= max_requests:
+                    return False
+                c.execute(
+                    "UPDATE rate_limit SET count = count + 1 WHERE user_id = ?",
+                    (user_id,),
+                )
+                c.commit()
+                return True
+            c.execute(
+                "INSERT INTO rate_limit (user_id, count, window_start) VALUES (?, 1, ?)",
+                (user_id, now),
+            )
+            c.commit()
+            return True
+    except sqlite3.Error as exc:
+        logging.warning("state rate_limit_check error: %s", exc)
+        return True  # fail open

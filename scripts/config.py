@@ -5,9 +5,17 @@ LINE Group Bot — Centralized configuration.
 import os
 
 # ─── LINE ─────────────────────────────────────────────────
-CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
-CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
+CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_GROUP_ID = os.environ.get("LINE_GROUP_ID", "")
+
+# Validate required env vars at startup
+_MISSING = [k for k, v in {
+    "LINE_CHANNEL_SECRET": CHANNEL_SECRET,
+    "LINE_CHANNEL_ACCESS_TOKEN": CHANNEL_ACCESS_TOKEN,
+}.items() if not v]
+if _MISSING:
+    raise RuntimeError(f"Missing required env vars: {', '.join(_MISSING)}")
 
 # ─── AI / APIs ────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

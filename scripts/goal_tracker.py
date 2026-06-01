@@ -22,12 +22,14 @@ GOAL_SHEET_ID = os.environ.get("GOAL_SHEET_ID", "")
 
 # ─── Token cache ──────────────────────────────────────────
 _token_cache = {"token": None, "expires_at": 0}
+_token_lock = threading.Lock()
 
 
 def _get_token():
     now = time.time()
-    if _token_cache["token"] and _token_cache["expires_at"] > now + 60:
-        return _token_cache["token"]
+    with _token_lock:
+        if _token_cache["token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["token"]
     r = requests.post("https://oauth2.googleapis.com/token", data={
         "client_id": GOOGLE_CLIENT_ID,
         "client_secret": GOOGLE_CLIENT_SECRET,
@@ -36,14 +38,19 @@ def _get_token():
     }, timeout=10)
     data = r.json()
     token = data.get("access_token")
-    _token_cache["token"] = token
-    _token_cache["expires_at"] = now + data.get("expires_in", 3600)
+    with _token_lock:
+        _token_cache["token"] = token
+        _token_cache["expires_at"] = now + data.get("expires_in", 3600)
     return token
 
 
 # ─── Nickname cache (10 min TTL) ─────────────────────────
 _nickname_cache = {}  # {user_id: (timestamp, nickname_or_None)}
 _NICKNAME_TTL = 600
+
+# ─── Nickname rows cache (30 sec TTL) ─────────────────────
+_nickname_rows_cache = {}  # {"rows": [...], "ts": timestamp}
+_NICKNAME_ROWS_TTL = 30
 
 # ─── Goals cache (in-process, 5 min TTL) ─────────────────
 _goals_cache = {}  # {cycle_id: (timestamp, {member: [goals]})}
@@ -101,8 +108,14 @@ def get_cycle_info(date=None):
 # ─── Nickname ─────────────────────────────────────────────
 
 def _get_nickname_rows():
+    global _nickname_rows_cache
+    now = time.time()
+    if _nickname_rows_cache and now - _nickname_rows_cache.get("ts", 0) < _NICKNAME_ROWS_TTL:
+        return _get_token(), _nickname_rows_cache["rows"]
     token = _get_token()
-    return token, _sheets_get(token, "暱稱!A:C")
+    rows = _sheets_get(token, "暱稱!A:C")
+    _nickname_rows_cache = {"rows": rows, "ts": now}
+    return token, rows
 
 
 def get_nickname(user_id):
