@@ -1054,6 +1054,16 @@ def handle_mention(text, member=None):
 
 
 
+# ─── Reply helper ───────────────────────────────────────
+def reply(reply_token: str, text: str) -> None:
+    """Send a text reply using reply token."""
+    cfg = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))
+    with ApiClient(cfg) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text[:4900])])
+        )
+
+
 # ─── Backward-compatible push alias ─────────────────────
 def push_to_group(text: str):
     push_text(LINE_GROUP_ID, text)

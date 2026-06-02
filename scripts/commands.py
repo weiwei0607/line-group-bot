@@ -22,7 +22,7 @@ from horoscope import _ZODIAC, match_zodiac
 from state import translate_get, translate_delete, rate_limit_check
 from weather import (
     send_morning_greeting, _parse_date_offset, get_weather_v2,
-    handle_countdown, handle_translate, _remember,
+    handle_countdown, handle_translate, _remember, _async_push,
 )
 from dispatch import try_dispatch
 from handlers.goals import (
@@ -381,10 +381,15 @@ def handle_message(event):
 
         # ── 十日目標：打卡 ──
         elif text.startswith("打卡"):
-            cycle_id, _, _ = get_cycle_info()
-            goals_dict = get_goals(cycle_id)
-            user_goals = goals_dict.get(member_label)
-            reply_text = handle_checkin(member_label, text, user_goals)
+            try:
+                cycle_id, _, _ = get_cycle_info()
+                goals_dict = get_goals(cycle_id)
+                user_goals = goals_dict.get(member_label)
+                reply_text = handle_checkin(member_label, text, user_goals)
+            except Exception as exc:
+                import logging
+                logging.exception("handle_checkin error for %s: %s", member_label, exc)
+                reply_text = f"打卡處理時出錯：{type(exc).__name__}，請稍後再試 😢"
 
         # ── 十日目標：完成單項目標 ──
         elif text.startswith("完成 "):
