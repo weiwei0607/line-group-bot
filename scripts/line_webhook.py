@@ -122,10 +122,31 @@ def _after_request(response):
     _METRICS.record(endpoint, duration_ms)
     return response
 
+def _verify_line_signature(body: str, signature: str) -> bool:
+    import hmac, hashlib, base64
+    secret = os.environ.get("LINE_CHANNEL_SECRET", "")
+    if not secret or not signature:
+        return False
+    expected = base64.b64encode(
+        hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()
+    ).decode()
+    return hmac.compare_digest(signature, expected)
+
+
+def _dispatch_callback(body: str, signature: str):
+    try:
+        handler.handle(body, signature)
+    except Exception as exc:
+        logging.error("Callback processing error: %s", exc)
+
+
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
+
+    if not _verify_line_signature(body, signature):
+        return "Invalid signature", 400
 
     # Deduplication
     import hashlib
@@ -135,10 +156,8 @@ def callback():
         return "OK", 200
     kv_set(dedup_key, True, ttl_seconds=60)
 
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
+    # Return 200 immediately, process in background
+    threading.Thread(target=_dispatch_callback, args=(body, signature), daemon=True).start()
     return "OK"
 
 @app.route("/health")
