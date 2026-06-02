@@ -98,6 +98,13 @@ def handle_set_goals(member, text):
 
 
 def handle_checkin(member, text, user_goals=None):
+    # 沒設目標不能打卡
+    if not user_goals:
+        return (
+            "你還沒設目標喔！先輸入「設目標：目標1 / 目標2」才能打卡 💪\n"
+            "不知道設什麼？可以說「幫我想目標」讓我幫你想 😊"
+        )
+
     content = re.sub(r'^打卡\s*', '', text).strip() or "打卡"
     day, total = add_checkin(member, content)
     if day == 0:
@@ -114,17 +121,14 @@ def handle_checkin(member, text, user_goals=None):
     elif streak == 2:
         streak_msg = "連兩天了！保持！"
 
-    if user_goals:
-        goals_str = " / ".join(user_goals[:3])
-        enc = call_gemini(
-            f"有人叫{member}，他的十日目標是：{goals_str}。\n"
-            f"今天他打卡說：「{content}」（第{day}/{total}天）\n"
-            f"請給一句輕鬆真誠的鼓勵，提到他的目標，台灣年輕人語氣，不超過 2 句。"
-        )
-        if not enc:
-            enc = random.choice(["太棒了！繼續保持！", "你最行！衝衝衝！", "很好！繼續！"])
-    else:
-        enc = random.choice(["太棒了！", "繼續保持！", "你最行！", "衝衝衝！", "很好！"])
+    goals_str = " / ".join(user_goals[:3])
+    enc = call_gemini(
+        f"有人叫{member}，他的十日目標是：{goals_str}。\n"
+        f"今天他打卡說：「{content}」（第{day}/{total}天）\n"
+        f"請給一句輕鬆真誠的鼓勵，提到他的目標，台灣年輕人語氣，不超過 2 句。"
+    )
+    if not enc:
+        enc = random.choice(["太棒了！繼續保持！", "你最行！衝衝衝！", "很好！繼續！"])
 
     # 用實際打卡天數畫進度條，不用「今天第幾天」
     stats = get_checkin_stats()

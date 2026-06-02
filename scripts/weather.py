@@ -175,15 +175,29 @@ def _format_om_rain_check(offset: int, desc: str) -> str:
 
 # 海外城市中英對照（WeatherAPI 對中文解析不穩定）
 _CITY_MAP = {
+    # 日本
     "北海道": "Hokkaido", "札幌": "Sapporo",
     "東京": "Tokyo", "大阪": "Osaka", "京都": "Kyoto", "沖繩": "Okinawa", "福岡": "Fukuoka",
-    "首爾": "Seoul", "釜山": "Busan",
-    "曼谷": "Bangkok", "清邁": "Chiang Mai",
-    "新加坡": "Singapore",
+    "名古屋": "Nagoya", "橫濱": "Yokohama", "仙台": "Sendai", "廣島": "Hiroshima",
+    # 韓國
+    "首爾": "Seoul", "釜山": "Busan", "濟州島": "Jeju",
+    # 東南亞
+    "曼谷": "Bangkok", "清邁": "Chiang Mai", "普吉島": "Phuket",
+    "新加坡": "Singapore", "吉隆坡": "Kuala Lumpur", "峇里島": "Bali",
+    "胡志明市": "Ho Chi Minh City", "河內": "Hanoi", "馬尼拉": "Manila",
+    # 歐洲
     "倫敦": "London", "巴黎": "Paris", "柏林": "Berlin", "羅馬": "Rome",
-    "紐約": "New York", "洛杉磯": "Los Angeles", "舊金山": "San Francisco", "西雅圖": "Seattle",
-    "悉尼": "Sydney", "墨爾本": "Melbourne",
+    "馬德里": "Madrid", "阿姆斯特丹": "Amsterdam", "巴塞隆納": "Barcelona",
+    "維也納": "Vienna", "布拉格": "Prague", "布達佩斯": "Budapest",
+    # 美洲
+    "紐約": "New York", "洛杉磯": "Los Angeles", "舊金山": "San Francisco",
+    "西雅圖": "Seattle", "芝加哥": "Chicago", "波士頓": "Boston",
+    "溫哥華": "Vancouver", "多倫多": "Toronto",
+    # 大洋洲
+    "悉尼": "Sydney", "墨爾本": "Melbourne", "奧克蘭": "Auckland",
+    # 中國
     "上海": "Shanghai", "北京": "Beijing", "香港": "Hong Kong",
+    "深圳": "Shenzhen", "廣州": "Guangzhou", "杭州": "Hangzhou", "成都": "Chengdu",
 }
 
 
