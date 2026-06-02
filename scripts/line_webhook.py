@@ -323,6 +323,17 @@ def _start_scheduler():
         logging.error("Scheduler failed to start: %s", e)
 
 
+# ─── TTS 語音檔案路由 ───
+@app.route("/tts/<filename>")
+def tts_file(filename):
+    from api_helpers import get_tts_audio
+    result = get_tts_audio(filename)
+    if result is None:
+        abort(404)
+    data, mime = result
+    return Response(data, mimetype=mime)
+
+
 _start_scheduler()
 
 

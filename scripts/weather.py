@@ -29,6 +29,16 @@ TW_CITIES = ["台北", "新北", "桃園", "台中", "台南", "高雄",
 
 
 _WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
+
+_TW_COORDS = {
+    "台北": (25.04, 121.53), "新北": (25.01, 121.46),
+    "桃園": (24.99, 121.31), "台中": (24.15, 120.67),
+    "台南": (22.99, 120.21), "高雄": (22.62, 120.30),
+    "基隆": (25.13, 121.74), "花蓮": (23.98, 121.60),
+    "台東": (22.76, 121.14), "宜蘭": (24.75, 121.75),
+    "嘉義": (23.48, 120.45), "新竹": (24.80, 120.97),
+}
+
 _OM_WMO = {
     0: "☀️ 晴天", 1: "🌤 大致晴", 2: "⛅️ 部分多雲", 3: "☁️ 陰天",
     45: "🌫 有霧", 48: "🌫 有霧",
@@ -80,13 +90,13 @@ def _parse_date_offset(text: str) -> tuple[int, str] | None:
     return None
 
 
-def _get_om_forecast():
-    """Open-Meteo 7天預報（台北座標）"""
+def _get_om_forecast(lat=25.04, lon=121.53):
+    """Open-Meteo 7天預報"""
     try:
         r = requests.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
-                "latitude": 25.04, "longitude": 121.53,
+                "latitude": lat, "longitude": lon,
                 "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
                 "timezone": "Asia/Taipei", "forecast_days": 7,
             },
@@ -123,9 +133,9 @@ def _weather_advice(condition: str, rain_prob: int, temp_max: int) -> str:
     return "\n".join(advice) if advice else ""
 
 
-def _format_om_weather(offset: int, desc: str) -> str:
+def _format_om_weather(offset: int, desc: str, lat=25.04, lon=121.53) -> str:
     """Open-Meteo 格式化指定日期天氣"""
-    forecast = _get_om_forecast()
+    forecast = _get_om_forecast(lat, lon)
     if not forecast:
         return "（天氣資料取得失敗）"
     if offset < 0 or offset >= len(forecast):
@@ -144,9 +154,9 @@ def _format_om_weather(offset: int, desc: str) -> str:
     return f"📅 {date_str}（{weekday}）\n" + "\n".join(lines)
 
 
-def _format_om_rain_check(offset: int, desc: str) -> str:
+def _format_om_rain_check(offset: int, desc: str, lat=25.04, lon=121.53) -> str:
     """回答「會不會下雨」"""
-    forecast = _get_om_forecast()
+    forecast = _get_om_forecast(lat, lon)
     if not forecast:
         return "（天氣資料取得失敗）"
     if offset < 0 or offset >= len(forecast):
@@ -884,25 +894,53 @@ def format_owm_weather(city_zh: str = "台北") -> str:
         return get_weather(city_zh)
 
 
+def _extract_city(text: str) -> str | None:
+    """從文字提取城市名稱，回傳城市或 None"""
+    for c in TW_CITIES:
+        if c in text:
+            return c
+    m = re.search(r'(.+?)(?:的)?天氣', text)
+    if m:
+        city = m.group(1).strip()
+        for prefix in ['今天', '明天', '後天', '大後天', '小棉襖']:
+            if city.startswith(prefix):
+                city = city[len(prefix):].strip()
+        return city if city else None
+    return None
+
+
 def get_weather_v2(text: str) -> str:
+    # 無論有無日期，先提取城市名稱
+    city = _extract_city(text)
+
     # 檢查是否有日期關鍵詞
     date_result = _parse_date_offset(text)
     if date_result:
         offset, desc = date_result
         if offset >= 7:
             return f"❌ {desc} 超出7天預報範圍，目前只能查未來7天喔"
-        if any(k in text for k in ["下雨", "會不會", "帶傘", "雨"]):
-            return _format_om_rain_check(offset, desc)
-        return f"🌡 {desc}天氣\n\n{_format_om_weather(offset, desc)}"
-    # 無日期，維持原有邏輯
-    city = None
-    for c in TW_CITIES:
-        if c in text:
-            city = c
-            break
 
-    # 如果不是台灣城市，fallback 到 wttr.in（支援全球中文地點）
+        # 海外城市（非台灣）→ wttr.in（雖然 format=3 不支援未來日期，但至少是正確城市）
+        if city and city not in TW_CITIES:
+            city_en = _city_to_en(city)
+            try:
+                resp = requests.get(f"https://wttr.in/{city_en}?format=3&lang=zh&m", timeout=8)
+                body = resp.text.strip()
+                if "error" in body.lower() or "not found" in body.lower():
+                    return f"❌ 找不到「{city}」的天氣資料"
+                return f"🌤 {body}\n（資料來源：wttr.in）"
+            except Exception:
+                return f"天氣查詢失敗，去 Google 查 {city} 天氣吧 😅"
+
+        # 台灣城市 + 日期 → Open-Meteo（使用該城市座標）
+        lat, lon = _TW_COORDS.get(city, (25.04, 121.53))
+        if any(k in text for k in ["下雨", "會不會", "帶傘", "雨"]):
+            return _format_om_rain_check(offset, desc, lat, lon)
+        return f"🌡 {desc}天氣\n\n{_format_om_weather(offset, desc, lat, lon)}"
+
+    # 無日期，維持原有邏輯
     if not city:
         return get_weather(text)
-
-    return format_owm_weather(city)
+    if city in TW_CITIES:
+        return format_owm_weather(city)
+    return get_weather(text)

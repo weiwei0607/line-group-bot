@@ -18,7 +18,7 @@ from goal_tracker import (
 
 from api_helpers import *
 from api_helpers import _should_log
-from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage
+from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage, AudioMessage
 from horoscope import _ZODIAC, match_zodiac
 from state import translate_get, translate_delete, rate_limit_check, remove_bg_set
 from weather import (
@@ -330,6 +330,39 @@ def handle_message(event):
             nick_b, mo, dy = m.group(1), m.group(2).zfill(2), m.group(3).zfill(2)
             ok = set_birthday_by_nickname(nick_b, f"{mo}-{dy}")
             reply_text = f"🎂 {nick_b} 生日設為 {mo}/{dy}" if ok else f"找不到暱稱「{nick_b}」"
+
+        # ── TTS 語音 ──
+        elif m := re.match(r"^(?:念|唸|說|讀)(?:出來)?\s*(.+)", text):
+            to_speak = m.group(1).strip()
+            from api_helpers import text_to_speech, save_tts_audio
+            tts_result = text_to_speech(to_speak, "zh-TW")
+            if tts_result:
+                audio_bytes, mime = tts_result
+                fname = save_tts_audio(audio_bytes, mime)
+                duration = min(len(to_speak) * 300 + 1000, 60000)
+                base_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+                if base_url:
+                    audio_url = f"{base_url}/tts/{fname}"
+                    # 「都執行」：語音 + 文字回覆一起發
+                    ai_reply = ""
+                    try:
+                        ai_reply = call_ai(
+                            f"用戶讓我朗讀「{to_speak}」，請用輕鬆俏皮的方式回應，"
+                            f"繁體中文，20字以內，不要重複內容。"
+                        ) or ""
+                    except Exception:
+                        pass
+                    messages = [AudioMessage(original_content_url=audio_url, duration=duration)]
+                    if ai_reply:
+                        messages.append(TextMessage(text=ai_reply[:4900]))
+                    line_bot_api = MessagingApi(api_client)
+                    line_bot_api.reply_message(
+                        ReplyMessageRequest(reply_token=reply_token, messages=messages)
+                    )
+                else:
+                    reply_text = "🔊 需要設定 RENDER_EXTERNAL_URL 才能發送語音"
+            else:
+                reply_text = "🔊 語音生成失敗，請稍後再試"
 
         # ── 積分榜 ──
         elif text in ("積分", "本週積分", "答題積分", "quiz積分"):

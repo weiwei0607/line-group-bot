@@ -1069,3 +1069,77 @@ def push_to_group(text: str):
     push_text(LINE_GROUP_ID, text)
 
 
+
+# ─── TTS（edge-tts，免費 Microsoft 神經語音）──────────
+
+import io
+
+_EDGE_TTS_VOICE = {
+    "zh-TW": "zh-TW-HsiaoChenNeural",
+    "zh-CN": "zh-CN-XiaoxiaoNeural",
+    "en": "en-US-JennyNeural",
+    "ja": "ja-JP-NanamiNeural",
+    "ko": "ko-KR-SunHiNeural",
+}
+
+_TTS_DIR = "/tmp/tts_files"
+os.makedirs(_TTS_DIR, exist_ok=True)
+
+
+def text_to_speech(text: str, lang: str = "zh-TW") -> tuple[bytes, str] | None:
+    try:
+        import asyncio
+        import edge_tts
+
+        voice = _EDGE_TTS_VOICE.get(lang, "zh-TW-HsiaoChenNeural")
+
+        async def _synth():
+            communicate = edge_tts.Communicate(text[:500], voice)
+            buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            return buf.getvalue()
+
+        audio_bytes = asyncio.run(_synth())
+        if audio_bytes and len(audio_bytes) > 100:
+            return audio_bytes, "audio/mpeg"
+        return None
+    except Exception:
+        return None
+
+
+def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
+    fname = f"tts_{int(time.time()*1000)}.m4a"
+    with open(os.path.join(_TTS_DIR, fname), "wb") as f:
+        f.write(audio_bytes)
+    try:
+        from tts_store import save_tts_audio as _db_save
+        _db_save(fname, audio_bytes, mime_type)
+    except Exception as _exc:
+        logging.warning("API error: %s", _exc)
+    files = sorted(
+        [fn for fn in os.listdir(_TTS_DIR) if fn.startswith("tts_")],
+        key=lambda fn: os.path.getmtime(os.path.join(_TTS_DIR, fn)),
+    )
+    for old in files[:-50]:
+        try:
+            os.remove(os.path.join(_TTS_DIR, old))
+        except OSError:
+            pass
+    return fname
+
+
+def get_tts_audio(filename: str) -> tuple[bytes, str] | None:
+    path = os.path.join(_TTS_DIR, filename)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read(), "audio/mpeg"
+    try:
+        from tts_store import get_tts_audio as _db_get
+        data = _db_get(filename)
+        if data:
+            return data
+    except Exception as _exc:
+        logging.warning("API error: %s", _exc)
+    return None
