@@ -1118,8 +1118,10 @@ def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
     # 用 ffmpeg 將 edge-tts 產出的 ADTS 轉成標準 MP3（LINE 相容性更好）
     try:
         import subprocess
+        import imageio_ffmpeg
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         subprocess.run(
-            ["ffmpeg", "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_path],
+            [ffmpeg_path, "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_path],
             check=True, capture_output=True, timeout=15,
         )
         try:
