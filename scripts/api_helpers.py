@@ -1116,28 +1116,71 @@ def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
     with open(raw_path, "wb") as f:
         f.write(audio_bytes)
     # 用 ffmpeg 將 edge-tts 產出的 ADTS 轉成標準 MP3（LINE 相容性更好）
+    conversion_ok = False
+    ffmpeg_error = ""
     try:
         import subprocess
         import imageio_ffmpeg
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-        subprocess.run(
-            [ffmpeg_path, "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100", mp3_path],
-            check=True, capture_output=True, timeout=15,
+        result = subprocess.run(
+            [ffmpeg_path, "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-ar", "44100", "-b:a", "128k", mp3_path],
+            capture_output=True, timeout=15,
         )
-        try:
-            os.remove(raw_path)
-        except OSError:
-            pass
+        if result.returncode == 0:
+            conversion_ok = True
+            try:
+                os.remove(raw_path)
+            except OSError:
+                pass
+        else:
+            ffmpeg_error = f"ffmpeg exit {result.returncode}: {result.stderr.decode('utf-8', errors='replace')[:500]}"
+            logging.warning("ffmpeg conversion failed: %s", ffmpeg_error)
     except Exception as exc:
-        logging.warning("ffmpeg conversion failed, using raw: %s", exc)
+        ffmpeg_error = f"ffmpeg exception: {type(exc).__name__}: {exc}"
+        logging.warning("ffmpeg conversion failed: %s", ffmpeg_error)
+    
+    if not conversion_ok:
+        # fallback: rename raw to mp3_path
         try:
             os.rename(raw_path, mp3_path)
         except OSError:
             pass
+    
     try:
         from tts_store import save_tts_audio as _db_save
         with open(mp3_path, "rb") as f:
-            _db_save(fname, f.read(), mime_type)
+            data = f.read()
+        _db_save(fname, data, mime_type)
+        # diagnostic: report file format
+        try:
+            import struct
+            # Check MPEG version from first valid frame
+            if data[:3] == b'ID3':
+                # Skip ID3v2 header
+                id3_size = struct.unpack('>I', b'\x00' + data[6:9])[0]
+                id3_size = ((id3_size & 0x7f000000) >> 3) | ((id3_size & 0x007f0000) >> 2) | ((id3_size & 0x00007f00) >> 1) | (id3_size & 0x0000007f)
+                frame_start = 10 + id3_size
+            else:
+                frame_start = 0
+            if len(data) > frame_start + 4:
+                frame_hdr = data[frame_start:frame_start+4]
+                if frame_hdr[0] == 0xff and (frame_hdr[1] & 0xe0) == 0xe0:
+                    mpeg_version_bits = (frame_hdr[1] >> 3) & 0x03
+                    mpeg_version = {0: "2.5", 1: "reserved", 2: "2", 3: "1"}.get(mpeg_version_bits, "unknown")
+                    layer_bits = (frame_hdr[1] >> 1) & 0x03
+                    layer = {0: "reserved", 1: "III", 2: "II", 3: "I"}.get(layer_bits, "unknown")
+                    bitrate_idx = (frame_hdr[2] >> 4) & 0x0f
+                    sampling_idx = (frame_hdr[2] >> 2) & 0x03
+                    sampling_rates = {
+                        "1": [44100, 48000, 32000],
+                        "2": [22050, 24000, 16000],
+                        "2.5": [11025, 12000, 8000],
+                    }
+                    sr_list = sampling_rates.get(mpeg_version, [0, 0, 0])
+                    sample_rate = sr_list[sampling_idx] if sampling_idx < len(sr_list) else 0
+                    send_telegram_alert(f"TTS save: MPEG-{mpeg_version} Layer {layer}, {sample_rate}Hz, {'ffmpeg OK' if conversion_ok else 'ffmpeg FAIL: ' + ffmpeg_error[:200]}")
+        except Exception as diag_exc:
+            send_telegram_alert(f"TTS save: {'ffmpeg OK' if conversion_ok else 'ffmpeg FAIL: ' + ffmpeg_error[:200]}, diag error: {diag_exc}")
     except Exception as _exc:
         logging.warning("API error: %s", _exc)
     files = sorted(
