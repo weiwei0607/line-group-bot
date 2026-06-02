@@ -701,15 +701,15 @@ def handle_message(event):
                 ReplyMessageRequest(reply_token=reply_token, messages=messages)
             )
         except Exception as exc:
-            import logging, os, requests
+            import logging, requests
             logging.warning("reply failed, falling back to push: %s", exc)
-            group_id = os.environ.get("LINE_GROUP_ID", "")
+            _gid = os.environ.get("LINE_GROUP_ID", "")
             token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-            if group_id and token and reply_text:
+            if _gid and token and reply_text:
                 requests.post(
                     "https://api.line.me/v2/bot/message/push",
                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    json={"to": group_id, "messages": [{"type": "text", "text": reply_text}]},
+                    json={"to": _gid, "messages": [{"type": "text", "text": reply_text}]},
                     timeout=10,
                 )
 
