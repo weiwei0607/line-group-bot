@@ -636,7 +636,14 @@ def handle_message(event):
                 translate_delete(user_id)
                 reply_text = translate_text(text, lang_code)
 
-        # ── 被點名 ──
+        # ── 情緒回覆（提到小棉襖 + 有情緒關鍵詞）──
+        from mood_replies import detect_mood, handle_mood_mention
+        mood = detect_mood(text)
+        if mood and (BOT_NAME in text or BOT_DISPLAY_NAME in text
+                     or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
+            reply_text = handle_mood_mention(text, member_label, mood)
+
+        # ── 被點名（一般對話）──
         elif (BOT_NAME in text or BOT_DISPLAY_NAME in text
               or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
             reply_text = handle_mention(text, member=member_label)
