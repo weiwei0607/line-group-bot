@@ -345,6 +345,7 @@ def handle_message(event):
                         from api_helpers import text_to_speech, save_tts_audio
                         from line_push import push_messages, push_text
                         from shared.alerts import send_telegram_alert
+                        send_telegram_alert(f"TTS started: '{to_speak}' group={group_id} user={user_id}")
                         tts_result = text_to_speech(to_speak, "zh-TW")
                         target = group_id or user_id or os.environ.get("LINE_GROUP_ID", "")
                         if not tts_result:

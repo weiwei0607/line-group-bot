@@ -1101,7 +1101,7 @@ def text_to_speech(text: str, lang: str = "zh-TW") -> tuple[bytes, str] | None:
                     buf.write(chunk["data"])
             return buf.getvalue()
 
-        audio_bytes = asyncio.run(_synth())
+        audio_bytes = asyncio.run(asyncio.wait_for(_synth(), timeout=10))
         if audio_bytes and len(audio_bytes) > 100:
             return audio_bytes, "audio/mpeg"
         return None
