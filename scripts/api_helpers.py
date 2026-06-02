@@ -1110,7 +1110,7 @@ def text_to_speech(text: str, lang: str = "zh-TW") -> tuple[bytes, str] | None:
 
 
 def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
-    fname = f"tts_{int(time.time()*1000)}.m4a"
+    fname = f"tts_{int(time.time()*1000)}.mp3"
     with open(os.path.join(_TTS_DIR, fname), "wb") as f:
         f.write(audio_bytes)
     try:
