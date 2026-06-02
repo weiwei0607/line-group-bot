@@ -20,10 +20,11 @@ from api_helpers import *
 from api_helpers import _should_log
 from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage
 from horoscope import _ZODIAC, match_zodiac
-from state import translate_get, translate_delete, rate_limit_check
+from state import translate_get, translate_delete, rate_limit_check, remove_bg_set
 from weather import (
     send_morning_greeting, _parse_date_offset, get_weather_v2,
-    handle_countdown, handle_translate, _remember, _async_push,
+    handle_countdown, handle_translate, translate_text, get_exchange_rate,
+    _remember, _async_push,
 )
 from dispatch import try_dispatch
 from handlers.goals import (
@@ -38,7 +39,6 @@ from handlers.quick_replies import (
 )
 from handlers.quiz import handle_quiz
 from handlers.vote import handle_vote
-from weather import _remember
 
 # LINE messaging configuration (local copy to avoid circular imports)
 _configuration = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))
