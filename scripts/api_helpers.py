@@ -1087,6 +1087,7 @@ os.makedirs(_TTS_DIR, exist_ok=True)
 
 
 def text_to_speech(text: str, lang: str = "zh-TW") -> tuple[bytes, str] | None:
+    # 1. Try edge-tts (neural voice, but outputs MPEG-2 24kHz)
     try:
         import asyncio
         import edge_tts
@@ -1104,9 +1105,22 @@ def text_to_speech(text: str, lang: str = "zh-TW") -> tuple[bytes, str] | None:
         audio_bytes = asyncio.run(asyncio.wait_for(_synth(), timeout=10))
         if audio_bytes and len(audio_bytes) > 100:
             return audio_bytes, "audio/mpeg"
-        return None
-    except Exception:
-        return None
+    except Exception as exc:
+        logging.warning("edge-tts failed: %s", exc)
+    # 2. Fallback to gTTS (outputs standard MPEG-1 44.1kHz MP3)
+    try:
+        from gtts import gTTS
+        tts_lang = {"zh-TW": "zh-TW", "zh-CN": "zh-CN", "en": "en", "ja": "ja"}.get(lang, "zh-TW")
+        tts = gTTS(text=text[:500], lang=tts_lang, slow=False)
+        buf = io.BytesIO()
+        tts.write_to_fp(buf)
+        audio_bytes = buf.getvalue()
+        if audio_bytes and len(audio_bytes) > 100:
+            send_telegram_alert(f"TTS: used gTTS fallback for '{text[:30]}'")
+            return audio_bytes, "audio/mpeg"
+    except Exception as exc:
+        logging.warning("gTTS fallback failed: %s", exc)
+    return None
 
 
 def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
