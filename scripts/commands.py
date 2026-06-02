@@ -17,6 +17,7 @@ from goal_tracker import (
 )
 
 from api_helpers import *
+from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage
 from state import translate_get, translate_delete, rate_limit_check
 from weather import (
     send_morning_greeting, _parse_date_offset, get_weather_v2,
@@ -235,7 +236,6 @@ def handle_message(event):
 
     # Rate limiting (30 requests / 60s per user)
     if user_id and not rate_limit_check(user_id, max_requests=30, window_seconds=60):
-        from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage
         with ApiClient(configuration) as api_client:
             api_client.default_api.reply_message(
                 ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text="⏳ 你發太快了，請稍後再試 👋")])
@@ -246,7 +246,6 @@ def handle_message(event):
     disp_text, disp_img = try_dispatch(text)
     if disp_text is not None:
         if disp_img:
-            from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage
             with ApiClient(configuration) as api_client:
                 MessagingApi(api_client).reply_message(
                     ReplyMessageRequest(
