@@ -198,9 +198,41 @@ def health():
     except Exception as e:
         checks["sheets"] = f"fail: {e}"
 
-    all_ok = all(v == "ok" for v in checks.values())
+    # 4. TTS (edge-tts) availability
+    try:
+        import edge_tts
+        checks["edge_tts"] = "ok"
+    except Exception as e:
+        checks["edge_tts"] = f"fail: {e}"
+
+    # 5. RENDER_EXTERNAL_URL
+    checks["render_url"] = os.environ.get("RENDER_EXTERNAL_URL", "NOT_SET")
+
+    all_ok = all(v == "ok" for v in checks.values() if isinstance(v, str))
     status = 200 if all_ok else 503
     return checks, status
+
+@app.route("/test-tts")
+def test_tts():
+    """Directly test edge-tts generation without going through LINE webhook."""
+    try:
+        from api_helpers import text_to_speech, save_tts_audio
+        result = text_to_speech("測試語音", "zh-TW")
+        if not result:
+            return {"error": "text_to_speech returned None (edge-tts may not be installed)"}, 500
+        audio_bytes, mime = result
+        fname = save_tts_audio(audio_bytes, mime)
+        base_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+        return {
+            "ok": True,
+            "filename": fname,
+            "audio_url": f"{base_url}/tts/{fname}" if base_url else None,
+            "render_url_set": bool(base_url),
+        }
+    except Exception as exc:
+        import traceback
+        return {"error": str(exc), "traceback": traceback.format_exc()}, 500
+
 
 @app.route("/metrics")
 def metrics():
