@@ -759,9 +759,14 @@ def get_weather_v2(text: str) -> str:
             return _format_om_rain_check(offset, desc)
         return f"🌡 {desc}天氣\n\n{_format_om_weather(offset, desc)}"
     # 無日期，維持原有邏輯
-    city = "台北"
+    city = None
     for c in TW_CITIES:
         if c in text:
             city = c
             break
+
+    # 如果不是台灣城市，fallback 到 wttr.in（支援全球中文地點）
+    if not city:
+        return get_weather(text)
+
     return format_owm_weather(city)
