@@ -137,7 +137,9 @@ def _dispatch_callback(body: str, signature: str):
     try:
         handler.handle(body, signature)
     except Exception as exc:
+        import traceback
         logging.error("Callback processing error: %s", exc)
+        send_telegram_alert(f"webhook處理失敗：{type(exc).__name__}: {str(exc)[:200]}\n{traceback.format_exc()[-300:]}")
 
 
 @app.route("/callback", methods=["POST"])
