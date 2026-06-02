@@ -669,17 +669,19 @@ def handle_message(event):
                 translate_delete(user_id)
                 reply_text = translate_text(text, lang_code)
 
-        # ── 情緒回覆（提到小棉襖 + 有情緒關鍵詞）──
-        from mood_replies import detect_mood, handle_mood_mention
-        mood = detect_mood(text)
-        if mood and (BOT_NAME in text or BOT_DISPLAY_NAME in text
-                     or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
-            reply_text = handle_mood_mention(text, member_label, mood)
+        # ── 情緒回覆（提到小棉襖 + 有情緒關鍵詞，且還沒被其他指令處理）──
+        if reply_text is None:
+            from mood_replies import detect_mood, handle_mood_mention
+            mood = detect_mood(text)
+            if mood and (BOT_NAME in text or BOT_DISPLAY_NAME in text
+                         or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
+                reply_text = handle_mood_mention(text, member_label, mood)
 
-        # ── 被點名（一般對話）──
-        elif (BOT_NAME in text or BOT_DISPLAY_NAME in text
-              or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
-            reply_text = handle_mention(text, member=member_label)
+        # ── 被點名（一般對話，且還沒被其他指令處理）──
+        if reply_text is None:
+            if (BOT_NAME in text or BOT_DISPLAY_NAME in text
+                  or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
+                reply_text = handle_mention(text, member=member_label)
 
         if not reply_text and not reply_image_url:
             return
