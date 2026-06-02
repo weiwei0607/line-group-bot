@@ -208,7 +208,7 @@ def health():
     # 5. RENDER_EXTERNAL_URL
     checks["render_url"] = os.environ.get("RENDER_EXTERNAL_URL", "NOT_SET")
 
-    all_ok = all(v == "ok" for v in checks.values() if isinstance(v, str))
+    all_ok = all(v == "ok" for k, v in checks.items() if isinstance(v, str) and k != "render_url")
     status = 200 if all_ok else 503
     return checks, status
 
