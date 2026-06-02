@@ -331,6 +331,33 @@ def handle_message(event):
             ok = set_birthday_by_nickname(nick_b, f"{mo}-{dy}")
             reply_text = f"🎂 {nick_b} 生日設為 {mo}/{dy}" if ok else f"找不到暱稱「{nick_b}」"
 
+        elif m := re.match(r'^!測試語音回覆\s*(.+)$', text):
+            # 測試用 reply_token 直接回覆 AudioMessage（與 Family Bot 相同方式）
+            to_speak = m.group(1).strip()[:10]  # 限制短文字避免超時
+            base_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+            if not base_url:
+                reply_text = "🔊 需要設定 RENDER_EXTERNAL_URL"
+            else:
+                try:
+                    from api_helpers import text_to_speech, save_tts_audio
+                    tts_result = text_to_speech(to_speak, "zh-TW")
+                    if tts_result:
+                        audio_bytes, mime = tts_result
+                        fname = save_tts_audio(audio_bytes, mime)
+                        duration = min(len(to_speak) * 300 + 1000, 60000)
+                        audio_url = f"{base_url}/tts/{fname}"
+                        # 直接 reply AudioMessage（不先發文字）
+                        from linebot.v3.messaging import AudioMessage
+                        from line_push import reply_audio
+                        reply_audio(event.reply_token, audio_url, duration)
+                        reply_text = None  # 已經用掉 reply_token
+                    else:
+                        reply_text = "🔊 語音生成失敗"
+                except Exception as exc:
+                    import logging
+                    logging.exception("測試語音回覆失敗: %s", exc)
+                    reply_text = f"🔊 測試失敗: {exc}"
+
         # ── TTS 語音 ──
         elif m := re.match(r"^(?:念|唸|說|讀)(?:出來)?\s*(.+)", text):
             to_speak = m.group(1).strip()
