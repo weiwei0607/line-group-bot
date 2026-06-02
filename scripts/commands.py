@@ -344,24 +344,30 @@ def handle_message(event):
                     try:
                         from api_helpers import text_to_speech, save_tts_audio
                         from line_push import push_messages, push_text
+                        from shared.alerts import send_telegram_alert
                         tts_result = text_to_speech(to_speak, "zh-TW")
-                        _gid = group_id or os.environ.get("LINE_GROUP_ID", "")
+                        target = group_id or user_id or os.environ.get("LINE_GROUP_ID", "")
                         if not tts_result:
-                            if _gid:
-                                push_text(_gid, "🔊 語音生成失敗，請稍後再試")
+                            if target:
+                                push_text(target, "🔊 語音生成失敗，請稍後再試")
+                            send_telegram_alert(f"TTS: text_to_speech failed, target={target}")
                             return
                         audio_bytes, mime = tts_result
                         fname = save_tts_audio(audio_bytes, mime)
                         duration = min(len(to_speak) * 300 + 1000, 60000)
                         audio_url = f"{base_url}/tts/{fname}"
-                        if _gid:
-                            push_messages(_gid, [AudioMessage(original_content_url=audio_url, duration=duration)])
+                        if target:
+                            push_messages(target, [AudioMessage(original_content_url=audio_url, duration=duration)])
+                            send_telegram_alert(f"TTS OK: pushed {audio_url} to {target[:30]}")
+                        else:
+                            send_telegram_alert(f"TTS: no target! group_id={group_id} user_id={user_id}")
                     except Exception as exc:
                         import logging
                         logging.exception("TTS async failed: %s", exc)
-                        _gid = group_id or os.environ.get("LINE_GROUP_ID", "")
-                        if _gid:
-                            push_text(_gid, "🔊 語音發送時出錯")
+                        send_telegram_alert(f"TTS async failed: {type(exc).__name__}: {exc}")
+                        target = group_id or user_id or os.environ.get("LINE_GROUP_ID", "")
+                        if target:
+                            push_text(target, "🔊 語音發送時出錯")
                 threading.Thread(target=_async_tts, daemon=True).start()
 
         # ── 積分榜 ──
