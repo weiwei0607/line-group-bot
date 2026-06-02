@@ -217,6 +217,27 @@ def version():
     return {"version": "mp3-fix-20250602"}
 
 
+@app.route("/test-push-audio")
+def test_push_audio():
+    """Push a pre-generated standard 44.1kHz MP3 to the group to test if AudioMessage works in push."""
+    try:
+        from line_push import push_messages
+        from linebot.v3.messaging import AudioMessage
+        import os
+        base_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+        target = os.environ.get("LINE_GROUP_ID", "")
+        if not base_url:
+            return {"error": "RENDER_EXTERNAL_URL not set"}, 500
+        if not target:
+            return {"error": "LINE_GROUP_ID not set"}, 500
+        audio_url = f"{base_url}/static/test_44k.mp3"
+        push_messages(target, [AudioMessage(original_content_url=audio_url, duration=2000)])
+        return {"ok": True, "audio_url": audio_url, "target": target[:30]}
+    except Exception as exc:
+        import traceback
+        return {"error": str(exc), "traceback": traceback.format_exc()}, 500
+
+
 @app.route("/test-tts")
 def test_tts():
     """Directly test edge-tts generation without going through LINE webhook."""
