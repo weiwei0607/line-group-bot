@@ -56,6 +56,8 @@ def handle_add_todo(member: str, text: str) -> str:
     target, date_s, content = parsed
     if target is None:
         target = member or "你"
+    if not content.strip():
+        return "請加上提醒內容！\n例：提醒我明天 交報告"
 
     date_str = _parse_reminder_date(date_s)
     if not date_str:
