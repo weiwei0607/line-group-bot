@@ -56,7 +56,7 @@ class _Metrics:
             return out
 
 _METRICS = _Metrics()
-from flask import Flask, request, abort, g
+from flask import Flask, request, abort, g, Response
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import (
