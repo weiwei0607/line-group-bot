@@ -7,7 +7,8 @@ from datetime import datetime
 from weather import _rapid
 from config import TMDB_API_KEY, RAPIDAPI_KEYS, _MEMBER_ZODIACS
 from goal_tracker import TW_TZ, get_all_zodiacs
-from utils import call_gemini, smart_translate
+from utils import call_gemini
+from api_helpers import smart_translate
 from state import _daily_cached, _daily_cache_set
 from weather import _QUOTA, _QUOTA_MSG
 
