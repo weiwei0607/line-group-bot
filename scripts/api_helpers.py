@@ -1121,7 +1121,7 @@ def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
         import imageio_ffmpeg
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         subprocess.run(
-            [ffmpeg_path, "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_path],
+            [ffmpeg_path, "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-q:a", "2", "-ar", "44100", mp3_path],
             check=True, capture_output=True, timeout=15,
         )
         try:
