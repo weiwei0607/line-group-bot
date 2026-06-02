@@ -1111,11 +1111,31 @@ def text_to_speech(text: str, lang: str = "zh-TW") -> tuple[bytes, str] | None:
 
 def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
     fname = f"tts_{int(time.time()*1000)}.mp3"
-    with open(os.path.join(_TTS_DIR, fname), "wb") as f:
+    raw_path = os.path.join(_TTS_DIR, f"raw_{fname}")
+    mp3_path = os.path.join(_TTS_DIR, fname)
+    with open(raw_path, "wb") as f:
         f.write(audio_bytes)
+    # 用 ffmpeg 將 edge-tts 產出的 ADTS 轉成標準 MP3（LINE 相容性更好）
+    try:
+        import subprocess
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_path],
+            check=True, capture_output=True, timeout=15,
+        )
+        try:
+            os.remove(raw_path)
+        except OSError:
+            pass
+    except Exception as exc:
+        logging.warning("ffmpeg conversion failed, using raw: %s", exc)
+        try:
+            os.rename(raw_path, mp3_path)
+        except OSError:
+            pass
     try:
         from tts_store import save_tts_audio as _db_save
-        _db_save(fname, audio_bytes, mime_type)
+        with open(mp3_path, "rb") as f:
+            _db_save(fname, f.read(), mime_type)
     except Exception as _exc:
         logging.warning("API error: %s", _exc)
     files = sorted(

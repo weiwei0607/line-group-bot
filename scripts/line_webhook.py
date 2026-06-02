@@ -212,6 +212,11 @@ def health():
     status = 200 if all_ok else 503
     return checks, status
 
+@app.route("/version")
+def version():
+    return {"version": "mp3-fix-20250602"}
+
+
 @app.route("/test-tts")
 def test_tts():
     """Directly test edge-tts generation without going through LINE webhook."""

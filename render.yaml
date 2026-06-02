@@ -2,7 +2,7 @@ services:
   - type: web
     name: weiwei-line-bot
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: apt-get update -qq && apt-get install -y ffmpeg && pip install -r requirements.txt
     startCommand: gunicorn --chdir scripts --workers 1 line_webhook:app --bind 0.0.0.0:$PORT
     envVars:
       - key: LINE_CHANNEL_SECRET
