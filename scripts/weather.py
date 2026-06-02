@@ -174,11 +174,25 @@ def _format_om_rain_check(offset: int, desc: str) -> str:
 
 
 def get_weather(text):
-    city = "台北"
+    # 先檢查台灣城市
+    city = None
     for c in TW_CITIES:
         if c in text:
             city = c
             break
+
+    # 沒有台灣城市，嘗試提取任意地點
+    if not city:
+        m = re.search(r'(.+?)(?:的)?天氣', text)
+        if m:
+            city = m.group(1).strip()
+            # 去掉常見前綴詞
+            for prefix in ['今天', '明天', '後天', '大後天', '小棉襖']:
+                if city.startswith(prefix):
+                    city = city[len(prefix):].strip()
+        if not city:
+            city = "台北"
+
     try:
         resp = requests.get(f"https://wttr.in/{city}?format=3&lang=zh&m", timeout=8)
         return f"🌤 {resp.text.strip()}\n（資料來源：wttr.in）"
