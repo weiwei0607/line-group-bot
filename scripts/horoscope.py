@@ -13,7 +13,7 @@ from utils import call_gemini
 def _smart_translate(text, target="zh-TW"):
     from api_helpers import smart_translate
     return smart_translate(text, target)
-from state import _daily_cached, _daily_cache_set
+from weather import _daily_cached, _daily_cache_set
 from weather import _QUOTA, _QUOTA_MSG
 
 logger = logging.getLogger(__name__)

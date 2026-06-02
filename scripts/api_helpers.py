@@ -67,6 +67,7 @@ def _should_log(text: str) -> bool:
 
 
 from utils import call_gemini, send_telegram_alert
+from weather import _daily_cached, _daily_cache_set
 import logging
 logger = logging.getLogger(__name__)
 
