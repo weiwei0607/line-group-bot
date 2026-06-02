@@ -239,6 +239,79 @@ def test_tts():
         return {"error": str(exc), "traceback": traceback.format_exc()}, 500
 
 
+@app.route("/test-ffmpeg")
+def test_ffmpeg():
+    """Test ffmpeg availability and conversion on Render."""
+    try:
+        import subprocess, imageio_ffmpeg, os, tempfile
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        # Create a small dummy audio (1kHz sine wave, 1 sec, 24kHz)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            wav_path = f.name
+        # Generate raw PCM
+        import math, struct
+        sample_rate = 24000
+        duration = 1
+        samples = [int(32767 * math.sin(2 * math.pi * 1000 * t / sample_rate)) for t in range(sample_rate * duration)]
+        with open(wav_path, "wb") as f:
+            f.write(b'RIFF')
+            f.write(struct.pack('<I', 36 + len(samples) * 2))
+            f.write(b'WAVEfmt ')
+            f.write(struct.pack('<IHHIIHH', 16, 1, 1, sample_rate, sample_rate * 2, 2, 16))
+            f.write(b'data')
+            f.write(struct.pack('<I', len(samples) * 2))
+            for s in samples:
+                f.write(struct.pack('<h', s))
+        mp3_path = wav_path.replace(".wav", ".mp3")
+        result = subprocess.run(
+            [ffmpeg_path, "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-ar", "44100", "-b:a", "128k", mp3_path],
+            capture_output=True, timeout=15,
+        )
+        try: os.remove(wav_path)
+        except OSError: pass
+        if result.returncode == 0 and os.path.exists(mp3_path):
+            with open(mp3_path, "rb") as f:
+                data = f.read()
+            try: os.remove(mp3_path)
+            except OSError: pass
+            # Check MPEG version
+            import struct
+            frame_start = 0
+            if data[:3] == b'ID3':
+                id3_size = struct.unpack('>I', b'\x00' + data[6:9])[0]
+                id3_size = ((id3_size & 0x7f000000) >> 3) | ((id3_size & 0x007f0000) >> 2) | ((id3_size & 0x00007f00) >> 1) | (id3_size & 0x0000007f)
+                frame_start = 10 + id3_size
+            mpeg_ver = "unknown"
+            sample_rate_out = 0
+            if len(data) > frame_start + 4:
+                hdr = data[frame_start:frame_start+4]
+                if hdr[0] == 0xff and (hdr[1] & 0xe0) == 0xe0:
+                    mpeg_ver = {0: "2.5", 1: "reserved", 2: "2", 3: "1"}.get((hdr[1] >> 3) & 0x03, "unknown")
+                    sr_idx = (hdr[2] >> 2) & 0x03
+                    sr_list = {"1": [44100, 48000, 32000], "2": [22050, 24000, 16000], "2.5": [11025, 12000, 8000]}.get(mpeg_ver, [0, 0, 0])
+                    sample_rate_out = sr_list[sr_idx] if sr_idx < len(sr_list) else 0
+            return {
+                "ok": True,
+                "ffmpeg_path": ffmpeg_path,
+                "ffmpeg_exists": os.path.exists(ffmpeg_path),
+                "mpeg_version": mpeg_ver,
+                "sample_rate": sample_rate_out,
+                "output_size": len(data),
+            }
+        else:
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ""
+            return {
+                "ok": False,
+                "ffmpeg_path": ffmpeg_path,
+                "ffmpeg_exists": os.path.exists(ffmpeg_path),
+                "returncode": result.returncode,
+                "stderr": stderr[:500],
+            }, 500
+    except Exception as exc:
+        import traceback
+        return {"error": str(exc), "traceback": traceback.format_exc()}, 500
+
+
 @app.route("/metrics")
 def metrics():
     return {"metrics": _METRICS.snapshot()}
