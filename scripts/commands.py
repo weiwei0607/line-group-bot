@@ -356,7 +356,23 @@ def handle_message(event):
                         audio_bytes, mime = tts_result
                         fname = save_tts_audio(audio_bytes, mime)
                         duration = min(len(to_speak) * 300 + 1000, 60000)
+                        # 先嘗試上傳到 Catbox 繞過 Cloudflare，失敗則 fallback 到 Render URL
                         audio_url = f"{base_url}/tts/{fname}"
+                        try:
+                            import requests
+                            mp3_path = f"/tmp/tts_files/{fname}"
+                            with open(mp3_path, "rb") as f:
+                                r = requests.post(
+                                    "https://catbox.moe/user/api.php",
+                                    files={"fileToUpload": f},
+                                    data={"reqtype": "fileupload"},
+                                    timeout=15,
+                                )
+                                if r.status_code == 200 and r.text.startswith("http"):
+                                    audio_url = r.text.strip()
+                        except Exception as upload_exc:
+                            import logging
+                            logging.warning("Catbox upload failed, fallback to Render URL: %s", upload_exc)
                         if target:
                             push_messages(target, [AudioMessage(original_content_url=audio_url, duration=duration)])
                             send_telegram_alert(f"TTS OK: pushed {audio_url} to {target[:30]}")
