@@ -241,6 +241,62 @@ def _get_weatherapi(city_en: str) -> str | None:
         return None
 
 
+def _city_to_en(city: str) -> str:
+    """中文城市名轉英文（硬編碼避免全域變數失效）"""
+    if city == "北海道": return "Hokkaido"
+    if city == "札幌": return "Sapporo"
+    if city == "東京": return "Tokyo"
+    if city == "大阪": return "Osaka"
+    if city == "京都": return "Kyoto"
+    if city == "沖繩": return "Okinawa"
+    if city == "福岡": return "Fukuoka"
+    if city == "名古屋": return "Nagoya"
+    if city == "橫濱": return "Yokohama"
+    if city == "仙台": return "Sendai"
+    if city == "廣島": return "Hiroshima"
+    if city == "首爾": return "Seoul"
+    if city == "釜山": return "Busan"
+    if city == "濟州島": return "Jeju"
+    if city == "曼谷": return "Bangkok"
+    if city == "清邁": return "Chiang Mai"
+    if city == "普吉島": return "Phuket"
+    if city == "新加坡": return "Singapore"
+    if city == "吉隆坡": return "Kuala Lumpur"
+    if city == "峇里島": return "Bali"
+    if city == "胡志明市": return "Ho Chi Minh City"
+    if city == "河內": return "Hanoi"
+    if city == "馬尼拉": return "Manila"
+    if city == "倫敦": return "London"
+    if city == "巴黎": return "Paris"
+    if city == "柏林": return "Berlin"
+    if city == "羅馬": return "Rome"
+    if city == "馬德里": return "Madrid"
+    if city == "阿姆斯特丹": return "Amsterdam"
+    if city == "巴塞隆納": return "Barcelona"
+    if city == "維也納": return "Vienna"
+    if city == "布拉格": return "Prague"
+    if city == "布達佩斯": return "Budapest"
+    if city == "紐約": return "New York"
+    if city == "洛杉磯": return "Los Angeles"
+    if city == "舊金山": return "San Francisco"
+    if city == "西雅圖": return "Seattle"
+    if city == "芝加哥": return "Chicago"
+    if city == "波士頓": return "Boston"
+    if city == "溫哥華": return "Vancouver"
+    if city == "多倫多": return "Toronto"
+    if city == "悉尼": return "Sydney"
+    if city == "墨爾本": return "Melbourne"
+    if city == "奧克蘭": return "Auckland"
+    if city == "上海": return "Shanghai"
+    if city == "北京": return "Beijing"
+    if city == "香港": return "Hong Kong"
+    if city == "深圳": return "Shenzhen"
+    if city == "廣州": return "Guangzhou"
+    if city == "杭州": return "Hangzhou"
+    if city == "成都": return "Chengdu"
+    return city
+
+
 def get_weather(text):
     # 先檢查台灣城市
     city = None
@@ -268,18 +324,13 @@ def get_weather(text):
         except Exception as _exc:
             return f"天氣查詢失敗，去 Google 查 {city} 天氣吧 😅"
 
-    # 海外城市：先查中英對照表用 WeatherAPI，對不到的再試 wttr.in
-    city_en = _CITY_MAP.get(city, city)
-    result = _get_weatherapi(city_en)
-    if result:
-        return f"{result}\n（資料來源：WeatherAPI）"
-
-    # fallback 到 wttr.in
+    # 海外城市：轉英文後用 wttr.in（Render 上中文地點不穩定）
+    city_en = _city_to_en(city)
     try:
-        resp = requests.get(f"https://wttr.in/{city}?format=3&lang=zh&m", timeout=8)
+        resp = requests.get(f"https://wttr.in/{city_en}?format=3&lang=zh&m", timeout=8)
         body = resp.text.strip()
         if "error" in body.lower() or "not found" in body.lower():
-            return f"❌ 找不到「{city}」的天氣資料，試試英文地名？"
+            return f"❌ 找不到「{city}」的天氣資料"
         return f"🌤 {body}\n（資料來源：wttr.in）"
     except Exception as _exc:
         return f"天氣查詢失敗，去 Google 查 {city} 天氣吧 😅"
