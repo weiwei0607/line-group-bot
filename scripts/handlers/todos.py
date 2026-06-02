@@ -30,6 +30,9 @@ def _parse_reminder_date(s: str) -> str | None:
     return None
 
 
+_TIME_EXPR = r'(?:今晚|今天晚上|晚上|早上|上午|下午|中午|凌晨|傍晚)(?:\d+|[零一二三四五六七八九十百]+)點\S*'
+
+
 def _extract_reminder(text: str) -> tuple | None:
     """Parse reminder text, supporting with or without spaces."""
     # Pattern 1: 提醒我 明天 交報告 / 提醒我明天交報告
@@ -39,6 +42,11 @@ def _extract_reminder(text: str) -> tuple | None:
     m = re.match(r'^提醒我\s*(\d{1,2}[/月]\d{1,2}日?)\s*(.*)', text)
     if m:
         return (None, m.group(1), m.group(2).strip())
+    # Pattern 1b: 提醒我 晚上九點半 做事 → 今天
+    m = re.match(rf'^提醒我\s*({_TIME_EXPR})\s*(.*)', text)
+    if m:
+        content = f"{m.group(1)} {m.group(2)}".strip()
+        return (None, "今天", content)
     # Pattern 2: 提醒 太后 明天 交報告 / 提醒太后明天交報告
     m = re.match(r'^提醒\s*(\S+?)\s*(今天|明天|後天|明日)\s*(.*)', text)
     if m:
@@ -46,6 +54,11 @@ def _extract_reminder(text: str) -> tuple | None:
     m = re.match(r'^提醒\s*(\S+?)\s*(\d{1,2}[/月]\d{1,2}日?)\s*(.*)', text)
     if m:
         return (m.group(1), m.group(2), m.group(3).strip())
+    # Pattern 2b: 提醒 爸爸 晚上九點半 做事 → 今天
+    m = re.match(rf'^提醒\s*(\S+?)\s*({_TIME_EXPR})\s*(.*)', text)
+    if m:
+        content = f"{m.group(2)} {m.group(3)}".strip()
+        return (m.group(1), "今天", content)
     return None
 
 
