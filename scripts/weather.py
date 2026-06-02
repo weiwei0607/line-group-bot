@@ -7,6 +7,10 @@ import random
 from collections import deque
 from datetime import datetime, timedelta
 from goal_tracker import TW_TZ, get_today_birthdays
+from linebot.v3.messaging import (
+    Configuration, ApiClient, MessagingApi,
+    ReplyMessageRequest, TextMessage,
+)
 from config import (
     MEMBERS, NASA_API_KEY, OWM_API_KEY, LINE_GROUP_ID,
     RAPIDAPI_KEYS, NINJA_KEYS,
