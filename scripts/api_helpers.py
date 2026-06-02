@@ -1136,8 +1136,30 @@ def save_tts_audio(audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str:
             ffmpeg_error = f"ffmpeg exit {result.returncode}: {result.stderr.decode('utf-8', errors='replace')[:500]}"
             logging.warning("ffmpeg conversion failed: %s", ffmpeg_error)
     except Exception as exc:
-        ffmpeg_error = f"ffmpeg exception: {type(exc).__name__}: {exc}"
+        ffmpeg_error = f"imageio-ffmpeg failed: {type(exc).__name__}: {exc}"
         logging.warning("ffmpeg conversion failed: %s", ffmpeg_error)
+        # fallback: try system ffmpeg
+        try:
+            import shutil, subprocess
+            sys_ffmpeg = shutil.which("ffmpeg")
+            if sys_ffmpeg:
+                result = subprocess.run(
+                    [sys_ffmpeg, "-y", "-i", raw_path, "-codec:a", "libmp3lame", "-ar", "44100", "-b:a", "128k", mp3_path],
+                    capture_output=True, timeout=15,
+                )
+                if result.returncode == 0:
+                    conversion_ok = True
+                    ffmpeg_error = ""
+                    try:
+                        os.remove(raw_path)
+                    except OSError:
+                        pass
+                else:
+                    ffmpeg_error += f" | system ffmpeg exit {result.returncode}: {result.stderr.decode('utf-8', errors='replace')[:300]}"
+            else:
+                ffmpeg_error += " | system ffmpeg not found"
+        except Exception as sys_exc:
+            ffmpeg_error += f" | system ffmpeg exception: {type(sys_exc).__name__}: {sys_exc}"
     
     if not conversion_ok:
         # fallback: rename raw to mp3_path
