@@ -1041,7 +1041,7 @@ def handle_mention(text, member=None):
         context += "\n".join(f"[{d}] {c}" for d, c in personal_mems)
         context += "\n\n"
 
-    return call_gemini(
+    return call_ai(
         f"你是一個活潑有趣的朋友群 LINE 機器人，名字叫「小棉襖」。\n"
         f"{context}"
         f"{'傳訊息的是 ' + member + '，' if member else ''}"
