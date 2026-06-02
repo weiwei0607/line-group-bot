@@ -30,17 +30,32 @@ def _parse_reminder_date(s: str) -> str | None:
     return None
 
 
-def handle_add_todo(member: str, text: str) -> str:
-    # 提醒我 明天 交報告
-    m = re.match(r'^提醒我\s+(\S+)\s+(.+)', text)
+def _extract_reminder(text: str) -> tuple | None:
+    """Parse reminder text, supporting with or without spaces."""
+    # Pattern 1: 提醒我 明天 交報告 / 提醒我明天交報告
+    m = re.match(r'^提醒我\s*(今天|明天|後天|明日)\s*(.*)', text)
     if m:
-        target, date_s, content = member or "你", m.group(1), m.group(2)
-    else:
-        # 提醒 太后 明天 交報告
-        m = re.match(r'^提醒\s+(\S+)\s+(\S+)\s+(.+)', text)
-        if not m:
-            return "格式：提醒 [人名] [日期] [事項]\n或：提醒我 明天 要做XXX\n日期支援：今天/明天/後天/6/5"
-        target, date_s, content = m.group(1), m.group(2), m.group(3)
+        return (None, m.group(1), m.group(2).strip())
+    m = re.match(r'^提醒我\s*(\d{1,2}[/月]\d{1,2}日?)\s*(.*)', text)
+    if m:
+        return (None, m.group(1), m.group(2).strip())
+    # Pattern 2: 提醒 太后 明天 交報告 / 提醒太后明天交報告
+    m = re.match(r'^提醒\s*(\S+?)\s*(今天|明天|後天|明日)\s*(.*)', text)
+    if m:
+        return (m.group(1), m.group(2), m.group(3).strip())
+    m = re.match(r'^提醒\s*(\S+?)\s*(\d{1,2}[/月]\d{1,2}日?)\s*(.*)', text)
+    if m:
+        return (m.group(1), m.group(2), m.group(3).strip())
+    return None
+
+
+def handle_add_todo(member: str, text: str) -> str:
+    parsed = _extract_reminder(text)
+    if not parsed:
+        return "格式：提醒 [人名] [日期] [事項]\n或：提醒我 明天 要做XXX\n日期支援：今天/明天/後天/6/5"
+    target, date_s, content = parsed
+    if target is None:
+        target = member or "你"
 
     date_str = _parse_reminder_date(date_s)
     if not date_str:
