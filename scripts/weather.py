@@ -173,6 +173,60 @@ def _format_om_rain_check(offset: int, desc: str) -> str:
     return result
 
 
+# 海外城市中英對照（WeatherAPI 對中文解析不穩定）
+_CITY_MAP = {
+    "北海道": "Hokkaido", "札幌": "Sapporo",
+    "東京": "Tokyo", "大阪": "Osaka", "京都": "Kyoto", "沖繩": "Okinawa", "福岡": "Fukuoka",
+    "首爾": "Seoul", "釜山": "Busan",
+    "曼谷": "Bangkok", "清邁": "Chiang Mai",
+    "新加坡": "Singapore",
+    "倫敦": "London", "巴黎": "Paris", "柏林": "Berlin", "羅馬": "Rome",
+    "紐約": "New York", "洛杉磯": "Los Angeles", "舊金山": "San Francisco", "西雅圖": "Seattle",
+    "悉尼": "Sydney", "墨爾本": "Melbourne",
+    "上海": "Shanghai", "北京": "Beijing", "香港": "Hong Kong",
+}
+
+
+def _weatherapi_icon(condition: str) -> str:
+    c = condition.lower()
+    if "clear" in c or "sunny" in c:
+        return "☀️"
+    if "cloud" in c and ("partly" in c or "scattered" in c):
+        return "⛅"
+    if "cloud" in c or "overcast" in c:
+        return "☁️"
+    if "rain" in c and ("light" in c or "drizzle" in c):
+        return "🌦"
+    if "rain" in c or "shower" in c:
+        return "🌧"
+    if "thunder" in c or "storm" in c:
+        return "⛈"
+    if "snow" in c or "sleet" in c or "blizzard" in c:
+        return "❄️"
+    if "fog" in c or "mist" in c or "haze" in c:
+        return "🌫"
+    return "🌡"
+
+
+def _get_weatherapi(city_en: str) -> str | None:
+    """用 RapidAPI WeatherAPI 查詢，回傳格式化的天氣文字或 None"""
+    try:
+        d = _rapid("get", "weatherapi-com.p.rapidapi.com", "/current.json", params={"q": city_en})
+        if not d or d is _QUOTA:
+            return None
+        loc = d.get("location", {})
+        cur = d.get("current", {})
+        name = loc.get("name", city_en)
+        country = loc.get("country", "")
+        temp = cur.get("temp_c", "?")
+        condition = cur.get("condition", {}).get("text", "")
+        icon = _weatherapi_icon(condition)
+        return f"{icon} {name}, {country}: {condition} {temp}°C"
+    except Exception as exc:
+        logger.warning("WeatherAPI error: %s", exc)
+        return None
+
+
 def get_weather(text):
     # 先檢查台灣城市
     city = None
@@ -186,16 +240,33 @@ def get_weather(text):
         m = re.search(r'(.+?)(?:的)?天氣', text)
         if m:
             city = m.group(1).strip()
-            # 去掉常見前綴詞
             for prefix in ['今天', '明天', '後天', '大後天', '小棉襖']:
                 if city.startswith(prefix):
                     city = city[len(prefix):].strip()
         if not city:
             city = "台北"
 
+    # 台灣城市用 wttr.in（穩定）
+    if city in TW_CITIES:
+        try:
+            resp = requests.get(f"https://wttr.in/{city}?format=3&lang=zh&m", timeout=8)
+            return f"🌤 {resp.text.strip()}\n（資料來源：wttr.in）"
+        except Exception as _exc:
+            return f"天氣查詢失敗，去 Google 查 {city} 天氣吧 😅"
+
+    # 海外城市：先查中英對照表用 WeatherAPI，對不到的再試 wttr.in
+    city_en = _CITY_MAP.get(city, city)
+    result = _get_weatherapi(city_en)
+    if result:
+        return f"{result}\n（資料來源：WeatherAPI）"
+
+    # fallback 到 wttr.in
     try:
         resp = requests.get(f"https://wttr.in/{city}?format=3&lang=zh&m", timeout=8)
-        return f"🌤 {resp.text.strip()}\n（資料來源：wttr.in）"
+        body = resp.text.strip()
+        if "error" in body.lower() or "not found" in body.lower():
+            return f"❌ 找不到「{city}」的天氣資料，試試英文地名？"
+        return f"🌤 {body}\n（資料來源：wttr.in）"
     except Exception as _exc:
         return f"天氣查詢失敗，去 Google 查 {city} 天氣吧 😅"
 
