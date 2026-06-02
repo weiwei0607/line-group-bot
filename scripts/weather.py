@@ -90,6 +90,23 @@ def _parse_date_offset(text: str) -> tuple[int, str] | None:
     return None
 
 
+def _geocode_city(city_en: str) -> tuple[float, float] | None:
+    """用 Open-Meteo Geocoding API 查城市座標"""
+    try:
+        r = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": city_en, "count": 1, "language": "zh"},
+            timeout=8,
+        )
+        data = r.json()
+        results = data.get("results")
+        if results:
+            return results[0]["latitude"], results[0]["longitude"]
+    except Exception as _exc:
+        logger.warning("Geocoding failed: %s", _exc)
+    return None
+
+
 def _get_om_forecast(lat=25.04, lon=121.53):
     """Open-Meteo 7天預報"""
     try:
@@ -920,9 +937,16 @@ def get_weather_v2(text: str) -> str:
         if offset >= 7:
             return f"❌ {desc} 超出7天預報範圍，目前只能查未來7天喔"
 
-        # 海外城市（非台灣）→ wttr.in（雖然 format=3 不支援未來日期，但至少是正確城市）
+        # 海外城市（非台灣）→ 先用 geocoding 找座標，再用 Open-Meteo 詳細預報
         if city and city not in TW_CITIES:
             city_en = _city_to_en(city)
+            coords = _geocode_city(city_en)
+            if coords:
+                lat, lon = coords
+                if any(k in text for k in ["下雨", "會不會", "帶傘", "雨"]):
+                    return _format_om_rain_check(offset, desc, lat, lon)
+                return f"🌡 {desc}天氣\n\n{_format_om_weather(offset, desc, lat, lon)}"
+            # geocoding 失敗則 fallback wttr.in
             try:
                 resp = requests.get(f"https://wttr.in/{city_en}?format=3&lang=zh&m", timeout=8)
                 body = resp.text.strip()
