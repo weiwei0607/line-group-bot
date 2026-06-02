@@ -365,54 +365,24 @@ def handle_message(event):
             if not base_url:
                 reply_text = "🔊 需要設定 RENDER_EXTERNAL_URL 才能發送語音"
             else:
-                # 先秒回文字，再異步生成語音 push（避免 LINE 3秒超時）
-                reply_text = f"🔊 收到！我來念「{to_speak[:20]}{'...' if len(to_speak)>20 else ''}」"
-                def _async_tts():
-                    try:
-                        from api_helpers import text_to_speech, save_tts_audio
-                        from line_push import push_messages, push_text
-                        from shared.alerts import send_telegram_alert
-                        send_telegram_alert(f"TTS started: '{to_speak}' group={group_id} user={user_id}")
-                        tts_result = text_to_speech(to_speak, "zh-TW")
-                        target = group_id or user_id or os.environ.get("LINE_GROUP_ID", "")
-                        if not tts_result:
-                            if target:
-                                push_text(target, "🔊 語音生成失敗，請稍後再試")
-                            send_telegram_alert(f"TTS: text_to_speech failed, target={target}")
-                            return
+                # 同步生成 + reply_audio（與 Family Bot 相同方式，避免 push_message 發 AudioMessage 的問題）
+                try:
+                    from api_helpers import text_to_speech, save_tts_audio
+                    from line_push import reply_audio
+                    tts_result = text_to_speech(to_speak, "zh-TW")
+                    if tts_result:
                         audio_bytes, mime = tts_result
                         fname = save_tts_audio(audio_bytes, mime)
                         duration = min(len(to_speak) * 300 + 1000, 60000)
-                        # 先嘗試上傳到 Catbox 繞過 Cloudflare，失敗則 fallback 到 Render URL
                         audio_url = f"{base_url}/tts/{fname}"
-                        try:
-                            import requests
-                            mp3_path = f"/tmp/tts_files/{fname}"
-                            with open(mp3_path, "rb") as f:
-                                r = requests.post(
-                                    "https://catbox.moe/user/api.php",
-                                    files={"fileToUpload": f},
-                                    data={"reqtype": "fileupload"},
-                                    timeout=15,
-                                )
-                                if r.status_code == 200 and r.text.startswith("http"):
-                                    audio_url = r.text.strip()
-                        except Exception as upload_exc:
-                            import logging
-                            logging.warning("Catbox upload failed, fallback to Render URL: %s", upload_exc)
-                        if target:
-                            push_messages(target, [AudioMessage(original_content_url=audio_url, duration=duration)])
-                            send_telegram_alert(f"TTS OK: pushed {audio_url} to {target[:30]}")
-                        else:
-                            send_telegram_alert(f"TTS: no target! group_id={group_id} user_id={user_id}")
-                    except Exception as exc:
-                        import logging
-                        logging.exception("TTS async failed: %s", exc)
-                        send_telegram_alert(f"TTS async failed: {type(exc).__name__}: {exc}")
-                        target = group_id or user_id or os.environ.get("LINE_GROUP_ID", "")
-                        if target:
-                            push_text(target, "🔊 語音發送時出錯")
-                threading.Thread(target=_async_tts, daemon=True).start()
+                        reply_audio(event.reply_token, audio_url, duration)
+                        reply_text = None  # 已經用掉 reply_token
+                    else:
+                        reply_text = "🔊 語音合成暫時失敗，請稍後再試 😢"
+                except Exception as exc:
+                    import logging
+                    logging.exception("TTS failed: %s", exc)
+                    reply_text = "🔊 語音發送時出錯"
 
         # ── 積分榜 ──
         elif text in ("積分", "本週積分", "答題積分", "quiz積分"):
