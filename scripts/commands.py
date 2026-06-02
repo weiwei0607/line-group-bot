@@ -37,6 +37,7 @@ from handlers.quick_replies import (
 )
 from handlers.quiz import handle_quiz
 from handlers.vote import handle_vote
+from weather import _remember
 
 # LINE messaging configuration (local copy to avoid circular imports)
 _configuration = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))

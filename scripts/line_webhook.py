@@ -162,6 +162,7 @@ def callback():
     threading.Thread(target=_dispatch_callback, args=(body, signature), daemon=True).start()
     return "OK"
 
+@app.route("/")
 @app.route("/health")
 def health():
     checks = {}
