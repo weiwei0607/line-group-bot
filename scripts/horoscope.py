@@ -8,7 +8,11 @@ from weather import _rapid
 from config import TMDB_API_KEY, RAPIDAPI_KEYS, _MEMBER_ZODIACS
 from goal_tracker import TW_TZ, get_all_zodiacs
 from utils import call_gemini
-from api_helpers import smart_translate
+
+
+def _smart_translate(text, target="zh-TW"):
+    from api_helpers import smart_translate
+    return smart_translate(text, target)
 from state import _daily_cached, _daily_cache_set
 from weather import _QUOTA, _QUOTA_MSG
 
@@ -35,7 +39,7 @@ def match_zodiac(sign1: str, sign2: str) -> str:
                 score = d.get("compatibilityScore") or d.get("score", "")
                 desc = d.get("description") or d.get("summary", "")
                 if desc:
-                    desc_zh = smart_translate(desc)
+                    desc_zh = _smart_translate(desc)
                     return f"💕 {s1}座 × {s2}座\n\n配對指數：{score}\n\n{desc_zh}"
             except Exception as _exc:
                 logger.warning("API error: %s", _exc)
@@ -310,7 +314,7 @@ def fetch_horoscope_for_sign(sign_zh: str) -> str:
         compat_raw = data.get("compatibility", "") or data.get("luckySign", "")
         compat = _ZODIAC_ZH.get(str(compat_raw).lower(), compat_raw)
         if desc_en:
-            desc = smart_translate(desc_en)
+            desc = _smart_translate(desc_en)
             lines = [f"🔮 {sign_zh}座：{desc}"]
             extra = []
             if mood:
@@ -378,7 +382,7 @@ def fetch_horoscope(text) -> str:
         compat_raw = data.get("compatibility", "") or data.get("luckySign", "")
         compat = _ZODIAC_ZH.get(str(compat_raw).lower(), compat_raw)
         if desc_en:
-            desc = smart_translate(desc_en)
+            desc = _smart_translate(desc_en)
             lines = [f"🔮 今日{sign_zh}座運勢\n\n{desc}"]
             extra = []
             if mood:
