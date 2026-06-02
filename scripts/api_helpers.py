@@ -5,6 +5,7 @@ Extracted from line_webhook.py to keep the webhook entry-point slim.
 
 import os
 import re
+import time
 import base64
 import random
 import threading
@@ -56,6 +57,14 @@ from horoscope import (
 
 
 
+_SKIP_LOG = {
+    "指令", "說明", "幫助", "help", "功能", "配額", "/配額", "api配額", "額度",
+    "查目標", "看目標", "目標", "待辦", "查提醒", "查待辦",
+    "今日打卡", "今天打卡了嗎", "誰打卡了", "上週期", "上次總結", "上輪總結",
+    "進度", "今天第幾天", "幾天了", "打卡進度", "積分",
+}
+
+
 def _should_log(text: str) -> bool:
     if text.startswith("!"):
         return False
@@ -67,7 +76,7 @@ def _should_log(text: str) -> bool:
 
 
 from utils import call_gemini, send_telegram_alert
-from weather import _daily_cached, _daily_cache_set
+from weather import _daily_cached, _daily_cache_set, _rapid, _ninja, _QUOTA, _QUOTA_MSG
 import logging
 logger = logging.getLogger(__name__)
 

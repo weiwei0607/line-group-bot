@@ -112,8 +112,9 @@ def handle_quiz(text: str, group_id: str, member_label: str) -> str | None:
 
     if text == "答案":
         gid = group_id or "default"
-        if quiz_get(gid) is not None:
-            state = quiz_delete(gid)
+        state = quiz_get(gid)
+        if state is not None:
+            quiz_delete(gid)
             if "correct_letter" in state:
                 return f"💡 答案是 {state['correct_letter']}. {state['answer']}"
             else:

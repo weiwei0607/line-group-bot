@@ -18,6 +18,7 @@ from goal_tracker import (
 
 from api_helpers import *
 from linebot.v3.messaging import ApiClient, ReplyMessageRequest, TextMessage, ImageMessage
+from horoscope import _ZODIAC, match_zodiac
 from state import translate_get, translate_delete, rate_limit_check
 from weather import (
     send_morning_greeting, _parse_date_offset, get_weather_v2,
