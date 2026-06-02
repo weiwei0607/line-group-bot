@@ -22,6 +22,34 @@ def _retry_http(fn, max_retries=3, backoff=2):
     return retry_http(max_retries=max_retries, backoff=backoff)(fn)()
 
 
+# ─── Groq ─────────────────────────────────────────────────
+
+def call_groq(prompt: str) -> str | None:
+    """呼叫 Groq (llama-3.3-70b-versatile)，回傳文字或 None。"""
+    key = os.environ.get("GROQ_API_KEY", "")
+    if not key:
+        return None
+    prompt = sanitize_input(prompt)
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
+            timeout=10,
+        )
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return None
+
+
+def call_ai(prompt: str) -> str | None:
+    """Groq 優先，失敗時 fallback 到 Gemini。"""
+    result = call_groq(prompt)
+    if result:
+        return result
+    return call_gemini(prompt)
+
+
 # ─── Gemini ───────────────────────────────────────────────
 
 def call_gemini(prompt: str, timeout: int = 12) -> str | None:
