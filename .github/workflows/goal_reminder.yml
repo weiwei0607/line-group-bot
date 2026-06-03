@@ -1,10 +1,7 @@
 name: 十日目標提醒
 
 on:
-  schedule:
-    # 每天 21:00 Asia/Taipei = 13:00 UTC
-    - cron: "0 13 * * *"
-  workflow_dispatch:
+  workflow_dispatch:  # 改由 APScheduler 在 Render 上準時執行，此 workflow 保留供手動觸發
 
 jobs:
   remind:

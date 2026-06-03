@@ -461,6 +461,19 @@ def _start_scheduler():
 
         scheduler.add_job(_silence_check, CronTrigger(hour=12, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
+        def _goal_reminder():
+            from state import cron_is_done, cron_mark_done
+            if cron_is_done("goal_reminder"):
+                return
+            try:
+                from goal_reminder import main as goal_reminder_main
+                goal_reminder_main()
+                cron_mark_done("goal_reminder")
+            except Exception as e:
+                send_telegram_alert(f"十日目標提醒失敗：{e}")
+
+        scheduler.add_job(_goal_reminder, CronTrigger(hour=21, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
+
         scheduler.start()
         logging.info("Scheduler started, all jobs scheduled")
         import atexit
