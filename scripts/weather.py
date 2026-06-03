@@ -579,6 +579,15 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
     cached = _daily_cached("nasa_apod")
     if cached:
         return cached
+
+    # 如果沒有 API Key，直接用 AI 生成，不要讓使用者等不到回應
+    if not NASA_API_KEY:
+        try:
+            text = call_gemini("給我一段 100 字以內的宇宙/天文冷知識或今日星空小語，用繁體中文，開頭加 '🌌 今日宇宙：'，內容溫暖有趣")
+            return (text or "🌌 今日宇宙：宇宙很大，我們的煩惱很小。抬頭看看星空吧！✨"), None
+        except Exception:
+            return "🌌 今日宇宙：宇宙很大，我們的煩惱很小。抬頭看看星空吧！✨", None
+
     for attempt in range(3):
         try:
             r = requests.get(
@@ -587,6 +596,9 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
                 timeout=25 if attempt == 0 else 40,
             )
             d = r.json()
+            # 檢查 API 是否回傳錯誤
+            if d.get("code") or d.get("error"):
+                raise Exception(f"NASA API error: {d}")
             title = d.get("title", "")
             explanation = (d.get("explanation") or "")[:400]
             media_type = d.get("media_type", "image")
@@ -600,10 +612,20 @@ def fetch_nasa_apod() -> tuple[str, str | None]:
                 import time
                 time.sleep(2)
                 continue
-            return "🌌 NASA 伺服器回應較慢，請稍後再試 🌌", None
+            # 超時 fallback：用 AI 生成
+            try:
+                text = call_gemini("給我一段 100 字以內的宇宙/天文冷知識，用繁體中文，開頭加 '🌌 今日宇宙：'")
+                return (text or "🌌 今日宇宙：NASA 伺服器回應較慢，請稍後再試 🌌"), None
+            except Exception:
+                return "🌌 今日宇宙：NASA 伺服器回應較慢，請稍後再試 🌌", None
         except Exception as _exc:
-            return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
-    return "🌌 今日宇宙：NASA 暫時無法連線 😢", None
+            # API 錯誤 fallback：用 AI 生成
+            try:
+                text = call_gemini("給我一段 100 字以內的宇宙/天文冷知識，用繁體中文，開頭加 '🌌 今日宇宙：'")
+                return (text or "🌌 今日宇宙：NASA 暫時無法連線，但我們的想像力無限 😢"), None
+            except Exception:
+                return "🌌 今日宇宙：NASA 暫時無法連線，但我們的想像力無限 😢", None
+    return "🌌 今日宇宙：NASA 暫時無法連線，但我們的想像力無限 😢", None
 
 
 # ─── RapidAPI 共用 helper ─────────────────────────────────

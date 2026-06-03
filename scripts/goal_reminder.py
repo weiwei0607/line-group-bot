@@ -177,7 +177,15 @@ def check_todos():
 
 
 def main():
-    today = _now().strftime("%Y-%m-%d")
+    now = _now()
+    today = now.strftime("%Y-%m-%d")
+    hour = now.hour
+
+    # 時間保護：只在早上 6:00~11:00 或晚上 19:00~23:00 發送，避免凌晨擾民
+    if not (6 <= hour <= 11 or 19 <= hour <= 23):
+        print(f"Current hour {hour} is outside allowed window (6-11 or 19-23), skipping.")
+        return
+
     from goal_tracker import get_setting, set_setting
     if get_setting("goal_reminder_last_run") == today:
         print(f"goal_reminder already ran on {today}, skipping.")
