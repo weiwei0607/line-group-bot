@@ -487,7 +487,7 @@ def handle_message(event):
             if not checked:
                 reply_text = "你這週期還沒打卡喔！快去打卡 💪\n指令：打卡 今天做了XXX"
             else:
-                bar = "🟩" * len(checked) + "⬜" * (total - len(checked))
+                bar = "".join("🟩" if d in set(checked) else "⬜" for d in range(1, total + 1))
                 days_str = "、".join(f"第{d}天" for d in checked)
                 streak_line = f"🔥 目前連續 {streak} 天" if streak >= 2 else ""
                 lines = [

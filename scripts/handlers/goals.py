@@ -130,11 +130,12 @@ def handle_checkin(member, text, user_goals=None):
     if not enc:
         enc = random.choice(["太棒了！繼續保持！", "你最行！衝衝衝！", "很好！繼續！"])
 
-    # 用實際打卡天數畫進度條，不用「今天第幾天」
+    # 進度條：哪天打卡哪格亮（對齊實際天數）
     stats = get_checkin_stats()
-    checked_count = len(stats.get(member, []))
-    bar = "🟩" * checked_count + "⬜" * max(0, total - checked_count)
-    parts = [f"✅ {member} 打卡成功！", f"📝 {content}", bar, f"第 {day}/{total} 天｜{enc}"]
+    checked_days = set(stats.get(member, []))
+    bar = "".join("🟩" if d in checked_days else "⬜" for d in range(1, total + 1))
+    checked_count = len(checked_days)
+    parts = [f"✅ {member} 打卡成功！", f"📝 {content}", bar, f"第 {day}/{total} 天 | 共 {checked_count} 天｜{enc}"]
     if streak_msg:
         parts.append(streak_msg)
     return "\n".join(parts)
@@ -187,8 +188,8 @@ def handle_view_goals():
                     bar = "🟩" * cnt + "⬜" * max(0, total - cnt)
                     lines.append(f"  {kw}｜{bar} {cnt}/{total}")
         else:
-            checked = stats.get(member, [])
-            bar = "🟩" * len(checked) + "⬜" * max(0, total - len(checked))
+            checked = set(stats.get(member, []))
+            bar = "".join("🟩" if d in checked else "⬜" for d in range(1, total + 1))
             lines.append(f"  打卡｜{bar} {len(checked)}/{total}")
         lines.append("")
     return "\n".join(lines).strip()
@@ -200,7 +201,8 @@ def handle_cycle_progress():
     lines = [f"📅 十日週期第 {day}/{total} 天\n"]
     if stats:
         for member, days in sorted(stats.items()):
-            bar = "🟩" * len(days) + "⬜" * (total - len(days))
+            checked = set(days)
+            bar = "".join("🟩" if d in checked else "⬜" for d in range(1, total + 1))
             lines.append(f"{member}：{bar} {len(days)}/{total}")
     else:
         lines.append("還沒有人打卡 😶")

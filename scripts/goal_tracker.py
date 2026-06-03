@@ -517,7 +517,7 @@ def build_summary_text(cycle_id=None) -> str:
                     lines.append(f"  {emoji} {kw}｜{bar} {cnt}/{total}")
         else:
             checked = len(stats.get(member, []))
-            bar = "🟩" * checked + "⬜" * max(0, total - checked)
+            bar = "".join("🟩" if d in set(stats.get(member, [])) else "⬜" for d in range(1, total + 1))
             lines.append(f"  打卡｜{bar} {checked}/{total}")
         lines.append("")
 
