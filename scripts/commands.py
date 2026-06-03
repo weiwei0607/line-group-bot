@@ -14,6 +14,7 @@ from goal_tracker import (
     set_zodiac, get_all_zodiacs, set_zodiac_by_nickname,
     get_quiz_scores, get_week_chat_logs,
     set_birthday_by_nickname, get_all_nicknames,
+    get_today_chat_logs, add_memory, add_personal_memory,
 )
 
 from api_helpers import *
@@ -290,6 +291,32 @@ def handle_message(event):
         elif text == "!測試早安":
             reply_text = "⏳ 生成早安訊息中..."
             threading.Thread(target=send_morning_greeting, daemon=True).start()
+
+        elif text == "!測試總結":
+            import traceback
+            from config import GOAL_SHEET_ID
+            lines = ["🔍 每日總結診斷報告\n"]
+            lines.append(f"GOAL_SHEET_ID: {'✅ 已設定' if GOAL_SHEET_ID else '❌ 未設定'}")
+            try:
+                logs = get_today_chat_logs()
+                lines.append(f"今天聊天記錄: {len(logs)} 則")
+                if logs:
+                    speakers = {m for m, _ in logs}
+                    lines.append(f"說話成員: {', '.join(speakers)}")
+                    for m, msg in logs[:5]:
+                        lines.append(f"  • {m}: {msg[:30]}...")
+                    if len(logs) > 5:
+                        lines.append(f"  ... 還有 {len(logs)-5} 則")
+                else:
+                    lines.append("⚠️ 沒有讀到今天的聊天記錄")
+                    lines.append("可能原因：")
+                    lines.append("  1. Google Sheet 沒有「聊天記錄」tab")
+                    lines.append("  2. 今天還沒有對話被記錄")
+                    lines.append("  3. Google OAuth 認證失敗")
+            except Exception as exc:
+                lines.append(f"❌ 讀取聊天記錄失敗: {type(exc).__name__}: {exc}")
+                lines.append(traceback.format_exc()[-300:])
+            reply_text = "\n".join(lines)
 
         elif m := re.match(r'^!設星座\s+(\S+)\s+(.+)$', text):
             nick_target, sign_input = m.group(1).strip(), m.group(2).strip().rstrip("座")
