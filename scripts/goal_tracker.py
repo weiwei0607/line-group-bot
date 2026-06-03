@@ -37,18 +37,29 @@ def _get_token():
     with _token_lock:
         if _token_cache["token"] and _token_cache["expires_at"] > now + 60:
             return _token_cache["token"]
-    r = requests.post("https://oauth2.googleapis.com/token", data={
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "refresh_token": GOOGLE_REFRESH_TOKEN,
-        "grant_type": "refresh_token",
-    }, timeout=10)
-    data = r.json()
-    token = data.get("access_token")
-    with _token_lock:
-        _token_cache["token"] = token
-        _token_cache["expires_at"] = now + data.get("expires_in", 3600)
-    return token
+    try:
+        r = requests.post("https://oauth2.googleapis.com/token", data={
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": GOOGLE_REFRESH_TOKEN,
+            "grant_type": "refresh_token",
+        }, timeout=10)
+        data = r.json()
+        if not r.ok:
+            err = data.get("error_description") or data.get("error") or f"HTTP {r.status_code}"
+            logging.error("Google OAuth failed: %s", err)
+            raise RuntimeError(f"Google OAuth failed: {err}")
+        token = data.get("access_token")
+        if not token:
+            logging.error("Google OAuth returned no access_token: %s", data)
+            raise RuntimeError("Google OAuth returned no access_token")
+        with _token_lock:
+            _token_cache["token"] = token
+            _token_cache["expires_at"] = now + data.get("expires_in", 3600)
+        return token
+    except Exception:
+        logging.exception("_get_token failed")
+        raise
 
 
 # ─── Nickname cache (10 min TTL, max 100 entries) ─────────
