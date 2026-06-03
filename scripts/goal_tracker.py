@@ -8,6 +8,7 @@ Sheets 結構:
 """
 
 import os
+import re
 import time
 import threading
 import calendar
@@ -15,6 +16,11 @@ import requests
 from datetime import datetime, timezone, timedelta
 
 TW_TZ = timezone(timedelta(hours=8))
+
+
+def _is_valid_line_user_id(uid: str) -> bool:
+    """LINE user IDs start with U followed by hex chars (len ≥ 30)."""
+    return bool(uid) and isinstance(uid, str) and uid.startswith("U") and len(uid) >= 30 and re.match(r"^U[a-f0-9]+$", uid, re.I) is not None
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
@@ -177,7 +183,10 @@ def get_user_id_by_nickname(nickname: str) -> str | None:
         _, rows = _get_nickname_rows()
         for row in rows[1:]:
             if len(row) >= 2 and row[1] == nickname:
-                return row[0]
+                uid = row[0]
+                if _is_valid_line_user_id(uid):
+                    return uid
+                logging.warning("get_user_id_by_nickname: invalid user_id %r for nickname %r", uid, nickname)
         return None
     except Exception:
         return None

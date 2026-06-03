@@ -8,6 +8,7 @@
 """
 
 import os
+import logging
 from datetime import datetime, timedelta, timezone
 from goal_tracker import (
     get_cycle_info, get_checkin_stats, get_goals,
@@ -195,6 +196,8 @@ def main():
     # 每天都發：今日打卡提醒
     daily_msg, daily_mentions = build_daily_checkin_reminder(cycle_id, day, total)
     if daily_msg:
+        if daily_mentions:
+            logging.info("Daily mentions: %s", daily_mentions)
         send_line_message(daily_msg, mentions=daily_mentions)
         sent.append("daily checkin reminder")
 
