@@ -293,10 +293,10 @@ def handle_message(event):
             threading.Thread(target=send_morning_greeting, daemon=True).start()
 
         elif text == "!測試總結":
-            import traceback
-            from config import GOAL_SHEET_ID
+            import traceback, os
+            _goal_sheet_id = os.environ.get("GOAL_SHEET_ID", "")
             lines = ["🔍 每日總結診斷報告\n"]
-            lines.append(f"GOAL_SHEET_ID: {'✅ 已設定' if GOAL_SHEET_ID else '❌ 未設定'}")
+            lines.append(f"GOAL_SHEET_ID: {'✅ 已設定' if _goal_sheet_id else '❌ 未設定'}")
             try:
                 logs = get_today_chat_logs()
                 lines.append(f"今天聊天記錄: {len(logs)} 則")

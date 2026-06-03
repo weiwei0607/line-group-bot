@@ -12,9 +12,12 @@ import os
 import sys
 import traceback
 
+import os
 from utils import call_gemini, send_telegram_alert
 from goal_tracker import get_today_chat_logs, add_memory, add_personal_memory, _now
-from config import MEMBERS, GOAL_SHEET_ID
+from config import MEMBERS
+
+GOAL_SHEET_ID = os.environ.get("GOAL_SHEET_ID", "")
 
 
 FORCE_RUN = os.environ.get("FORCE_RUN", "") in ("1", "true", "yes")
