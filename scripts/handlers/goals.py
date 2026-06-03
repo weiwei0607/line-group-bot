@@ -110,7 +110,32 @@ def handle_checkin(member, text, user_goals=None):
     if day == 0:
         return "打卡失敗 😢 等一下再試試？"
 
-    streak = get_streak(member)
+    # 判斷這次打卡對應哪個目標，並計算該目標的進度
+    log = get_checkin_log()
+    member_log = log.get(member, {})
+
+    matched_goal = None
+    for g in user_goals:
+        kw = _goal_keyword(g).lower()
+        if kw in content.lower() or content.lower() in g.lower():
+            matched_goal = g
+            break
+
+    if matched_goal:
+        goal_kw = _goal_keyword(matched_goal).lower()
+        checked_days = {d for d, contents in member_log.items() if any(goal_kw in c.lower() for c in contents)}
+        # 計算該目標的連續天數
+        streak = 0
+        for d in range(day, 0, -1):
+            if d in checked_days:
+                streak += 1
+            else:
+                break
+    else:
+        stats = get_checkin_stats()
+        checked_days = set(stats.get(member, []))
+        streak = get_streak(member)
+
     streak_msg = ""
     if streak >= 7:
         streak_msg = f"🔥🔥 連續 {streak} 天！神人！"
@@ -130,9 +155,7 @@ def handle_checkin(member, text, user_goals=None):
     if not enc:
         enc = random.choice(["太棒了！繼續保持！", "你最行！衝衝衝！", "很好！繼續！"])
 
-    # 進度條：哪天打卡哪格亮（對齊實際天數）
-    stats = get_checkin_stats()
-    checked_days = set(stats.get(member, []))
+    # 進度條：只顯示當前打卡目標的完成天數
     bar = "".join("🟩" if d in checked_days else "⬜" for d in range(1, total + 1))
     checked_count = len(checked_days)
     parts = [f"✅ {member} 打卡成功！", f"📝 {content}", bar, f"第 {day}/{total} 天 | 共 {checked_count} 天｜{enc}"]
