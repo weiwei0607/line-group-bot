@@ -26,35 +26,37 @@ def _get_configuration():
     return _configuration
 
 
+def _reply_messages(reply_token: str, messages: list):
+    """Use requests directly to avoid urllib3 hanging issues in LINE Bot SDK."""
+    if not reply_token or not messages:
+        return
+    try:
+        _retry_http(
+            lambda: requests.post(
+                "https://api.line.me/v2/bot/message/reply",
+                headers={
+                    "Authorization": f"Bearer {_CHANNEL_ACCESS_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"replyToken": reply_token, "messages": messages},
+                timeout=15,
+            )
+        )
+    except Exception as exc:
+        logger.warning("_reply_messages failed: %s", exc)
+        raise
+
+
 def reply_text(reply_token: str, text: str):
     try:
-        cfg = _get_configuration()
-        with ApiClient(cfg) as api_client:
-            MessagingApi(api_client).reply_message(
-                ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[TextMessage(text=text[:4900])],
-                ),
-                _request_timeout=15,
-            )
+        _reply_messages(reply_token, [{"type": "text", "text": text[:4900]}])
     except Exception as exc:
         logger.warning("reply_text failed: %s", exc)
 
 
 def reply_image(reply_token: str, image_url: str, fallback_text: str = "圖片發送失敗"):
     try:
-        cfg = _get_configuration()
-        with ApiClient(cfg) as api_client:
-            MessagingApi(api_client).reply_message(
-                ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[ImageMessage(
-                        original_content_url=image_url,
-                        preview_image_url=image_url,
-                    )],
-                ),
-                _request_timeout=15,
-            )
+        _reply_messages(reply_token, [{"type": "image", "originalContentUrl": image_url, "previewImageUrl": image_url}])
     except Exception as exc:
         logger.warning("reply_image failed: %s", exc)
         reply_text(reply_token, fallback_text)
@@ -62,18 +64,7 @@ def reply_image(reply_token: str, image_url: str, fallback_text: str = "圖片�
 
 def reply_audio(reply_token: str, audio_url: str, duration: int = 5000, fallback_text: str = "語音發送失敗"):
     try:
-        cfg = _get_configuration()
-        with ApiClient(cfg) as api_client:
-            MessagingApi(api_client).reply_message(
-                ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[AudioMessage(
-                        original_content_url=audio_url,
-                        duration=duration,
-                    )],
-                ),
-                _request_timeout=15,
-            )
+        _reply_messages(reply_token, [{"type": "audio", "originalContentUrl": audio_url, "duration": duration}])
     except Exception as exc:
         logger.warning("reply_audio failed: %s", exc)
         reply_text(reply_token, fallback_text)
@@ -81,18 +72,10 @@ def reply_audio(reply_token: str, audio_url: str, duration: int = 5000, fallback
 
 def reply_image_with_text(reply_token: str, image_url: str, text: str):
     try:
-        cfg = _get_configuration()
-        with ApiClient(cfg) as api_client:
-            MessagingApi(api_client).reply_message(
-                ReplyMessageRequest(
-                    reply_token=reply_token,
-                    messages=[
-                        ImageMessage(original_content_url=image_url, preview_image_url=image_url),
-                        TextMessage(text=text[:4900]),
-                    ],
-                ),
-                _request_timeout=15,
-            )
+        _reply_messages(reply_token, [
+            {"type": "image", "originalContentUrl": image_url, "previewImageUrl": image_url},
+            {"type": "text", "text": text[:4900]},
+        ])
     except Exception as exc:
         logger.warning("reply_image_with_text failed: %s", exc)
         reply_text(reply_token, text)
