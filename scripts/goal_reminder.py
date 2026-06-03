@@ -197,7 +197,12 @@ def main():
     daily_msg, daily_mentions = build_daily_checkin_reminder(cycle_id, day, total)
     if daily_msg:
         if daily_mentions:
-            logging.info("Daily mentions: %s", daily_mentions)
+            logging.info("[goal_reminder] text=%r", daily_msg)
+            logging.info("[goal_reminder] mentions=%s", daily_mentions)
+            # Sanity check: verify every mention points to valid substring
+            for m in daily_mentions:
+                sub = daily_msg[m["index"]:m["index"]+m["length"]]
+                logging.info("[goal_reminder] mention substring: %r", sub)
         send_line_message(daily_msg, mentions=daily_mentions)
         sent.append("daily checkin reminder")
 

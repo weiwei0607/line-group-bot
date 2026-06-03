@@ -105,7 +105,7 @@ def send_line_message(text: str, group_id: str | None = None, mentions: list | N
     if mentions:
         msg["mention"] = {"mentionees": mentions}
     try:
-        _retry_http(
+        resp = _retry_http(
             lambda: requests.post(
                 "https://api.line.me/v2/bot/message/push",
                 headers={
@@ -116,6 +116,7 @@ def send_line_message(text: str, group_id: str | None = None, mentions: list | N
                 timeout=10,
             )
         )
+        logging.info("send_line_message: status=%s body=%s", resp.status_code, resp.text[:200])
     except Exception as exc:
         logging.warning("send_line_message: %s", exc)
 

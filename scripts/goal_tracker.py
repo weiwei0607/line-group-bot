@@ -185,7 +185,7 @@ def get_user_id_by_nickname(nickname: str) -> str | None:
             if len(row) >= 2 and row[1] == nickname:
                 uid = row[0]
                 if _is_valid_line_user_id(uid):
-                    return uid
+                    return uid.upper()
                 logging.warning("get_user_id_by_nickname: invalid user_id %r for nickname %r", uid, nickname)
         return None
     except Exception:
