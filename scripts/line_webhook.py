@@ -217,6 +217,23 @@ def version():
     return {"version": "mp3-fix-20250602"}
 
 
+@app.route("/daily_push", methods=["POST"])
+def daily_push():
+    """早安推播，由 GitHub Actions 每天 07:50 呼叫"""
+    cron_secret = os.environ.get("CRON_SECRET", "")
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not cron_secret or not token or token != cron_secret:
+        abort(403)
+
+    from weather import send_morning_greeting
+    try:
+        send_morning_greeting()
+    except Exception as e:
+        logger.error("daily_push error: %s", e)
+        return str(e), 500
+    return "OK"
+
+
 @app.route("/test-push-audio")
 def test_push_audio():
     """Push a pre-generated standard 44.1kHz MP3 to the group to test if AudioMessage works in push."""
