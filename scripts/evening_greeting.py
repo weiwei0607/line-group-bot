@@ -82,4 +82,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"Evening greeting failed: {e}")
+        print(traceback.format_exc())
+        raise
