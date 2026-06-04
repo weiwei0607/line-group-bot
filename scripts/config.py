@@ -9,13 +9,15 @@ CHANNEL_SECRET = env("LINE_CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = env("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_GROUP_ID = env("LINE_GROUP_ID", "")
 
-# Validate required env vars at startup
-_MISSING = [k for k, v in {
-    "LINE_CHANNEL_SECRET": CHANNEL_SECRET,
-    "LINE_CHANNEL_ACCESS_TOKEN": CHANNEL_ACCESS_TOKEN,
-}.items() if not v]
-if _MISSING:
-    raise RuntimeError(f"Missing required env vars: {', '.join(_MISSING)}")
+# Validate required env vars — only enforce when running as web server
+def assert_web_env():
+    """Call this from the Flask app entry point, not from scripts."""
+    _missing = [k for k, v in {
+        "LINE_CHANNEL_SECRET": CHANNEL_SECRET,
+        "LINE_CHANNEL_ACCESS_TOKEN": CHANNEL_ACCESS_TOKEN,
+    }.items() if not v]
+    if _missing:
+        raise RuntimeError(f"Missing required env vars: {', '.join(_missing)}")
 
 # ─── AI / APIs ────────────────────────────────────────────
 GEMINI_API_KEY = env("GEMINI_API_KEY", "")

@@ -79,7 +79,8 @@ from goal_tracker import (
     GOAL_SHEET_ID
 )
 
-from config import CHANNEL_SECRET, CHANNEL_ACCESS_TOKEN
+from config import CHANNEL_SECRET, CHANNEL_ACCESS_TOKEN, assert_web_env
+assert_web_env()
 from linebot.v3.messaging import Configuration
 
 app = Flask(__name__)
