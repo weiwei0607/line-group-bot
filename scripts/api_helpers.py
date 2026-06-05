@@ -169,21 +169,25 @@ def smart_translate(text: str, target: str = "zh-TW") -> str:
 
 # ─── LINE helpers ─────────────────────────────────────────
 
-def get_display_name(api_client, group_id, user_id):
+def get_display_name(group_id, user_id):
     try:
-        line_bot_api = MessagingApi(api_client)
-        profile = line_bot_api.get_group_member_profile(group_id, user_id)
-        return profile.display_name
+        token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+        resp = requests.get(
+            f"https://api.line.me/v2/bot/group/{group_id}/member/{user_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=8,
+        )
+        return resp.json().get("displayName", "某人")
     except Exception as _exc:
         logger.warning("get_group_member_profile error: %s", _exc)
         return "某人"
 
 
-def get_member_label(api_client, group_id, user_id):
+def get_member_label(group_id, user_id):
     nick = get_nickname(user_id)
     if nick:
         return nick
-    return get_display_name(api_client, group_id, user_id)
+    return get_display_name(group_id, user_id)
 
 
 
@@ -1056,12 +1060,9 @@ def handle_mention(text, member=None):
 
 # ─── Reply helper ───────────────────────────────────────
 def reply(reply_token: str, text: str) -> None:
-    """Send a text reply using reply token."""
-    cfg = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))
-    with ApiClient(cfg) as api_client:
-        MessagingApi(api_client).reply_message(
-            ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text[:4900])])
-        )
+    """Send a text reply using requests (avoids urllib3 hanging on Render)."""
+    from line_push import reply_text as _rt
+    _rt(reply_token, text)
 
 
 # ─── Backward-compatible push alias ─────────────────────

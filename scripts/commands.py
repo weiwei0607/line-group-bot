@@ -242,26 +242,15 @@ def handle_message(event):
 
     # Rate limiting (30 requests / 60s per user)
     if user_id and not rate_limit_check(user_id, max_requests=30, window_seconds=60):
-        with ApiClient(configuration) as api_client:
-            api_client.default_api.reply_message(
-                ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text="⏳ 你發太快了，請稍後再試 👋")])
-            )
+        reply(reply_token, "⏳ 你發太快了，請稍後再試 👋")
         return
 
     # ── Fast-path: simple stateless dispatch ──
     disp_text, disp_img = try_dispatch(text)
     if disp_text is not None:
         if disp_img:
-            with ApiClient(configuration) as api_client:
-                MessagingApi(api_client).reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[
-                            TextMessage(text=disp_text[:4900]),
-                            ImageMessage(original_content_url=disp_img, preview_image_url=disp_img),
-                        ],
-                    )
-                )
+            from line_push import reply_image_with_text
+            reply_image_with_text(reply_token, disp_img, disp_text)
         else:
             reply(reply_token, disp_text)
         return
@@ -273,7 +262,7 @@ def handle_message(event):
     reply_image_url = None
 
     with ApiClient(configuration) as api_client:
-        member_label = get_member_label(api_client, group_id, user_id)
+        member_label = get_member_label(group_id, user_id)
         _remember(member_label, text)
         if _should_log(text):
             threading.Thread(
@@ -735,32 +724,14 @@ def handle_message(event):
         if not reply_text and not reply_image_url:
             return
 
-        messages = []
-        if reply_text:
-            messages.append(TextMessage(text=reply_text))
-        if reply_image_url:
-            messages.append(ImageMessage(
-                original_content_url=reply_image_url,
-                preview_image_url=reply_image_url,
-            ))
-
-        line_bot_api = MessagingApi(api_client)
-        try:
-            line_bot_api.reply_message(
-                ReplyMessageRequest(reply_token=reply_token, messages=messages)
-            )
-        except Exception as exc:
-            import logging, requests
-            logging.warning("reply failed, falling back to push: %s", exc)
-            _gid = os.environ.get("LINE_GROUP_ID", "")
-            token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-            if _gid and token and reply_text:
-                requests.post(
-                    "https://api.line.me/v2/bot/message/push",
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    json={"to": _gid, "messages": [{"type": "text", "text": reply_text}]},
-                    timeout=10,
-                )
+        from line_push import reply_text as _rt, reply_image as _ri
+        if reply_text and reply_image_url:
+            from line_push import reply_image_with_text
+            reply_image_with_text(reply_token, reply_image_url, reply_text)
+        elif reply_text:
+            _rt(reply_token, reply_text)
+        elif reply_image_url:
+            _ri(reply_token, reply_image_url)
 
 
 def handle_audio(event):
