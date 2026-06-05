@@ -6,10 +6,7 @@ import os
 import logging
 import requests
 import time
-from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi,
-    ReplyMessageRequest, TextMessage, ImageMessage, AudioMessage,
-)
+from linebot.v3.messaging import Configuration
 
 logger = logging.getLogger(__name__)
 

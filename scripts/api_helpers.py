@@ -13,10 +13,7 @@ import requests
 from collections import deque
 from datetime import datetime, timedelta
 from goal_tracker import TW_TZ
-from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi, MessagingApiBlob,
-    ReplyMessageRequest, TextMessage, ImageMessage
-)
+from linebot.v3.messaging import Configuration
 
 from goal_tracker import (
     get_cycle_info, set_goals, get_goals, add_checkin,
