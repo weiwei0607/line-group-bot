@@ -731,12 +731,8 @@ def _get_configuration():
 
 def _async_push(reply_token: str, placeholder: str, fn, *args):
     """Reply ⏳ immediately, run fn(*args) in background, push actual result."""
-    cfg = _get_configuration()
-    with ApiClient(cfg) as api_client:
-        MessagingApi(api_client).reply_message(
-            ReplyMessageRequest(reply_token=reply_token,
-                                messages=[TextMessage(text=placeholder)])
-        )
+    from line_push import reply_text as _rt
+    _rt(reply_token, placeholder)
     def _run():
         try:
             result = fn(*args)
