@@ -90,11 +90,27 @@ def _retry_http(fn, max_retries=3, backoff=2):
     raise last_exc
 
 
+def _telegram_alert(msg: str):
+    """Send alert to Telegram if credentials are available."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": msg},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
 def push_messages(to: str, messages: list):
     if not to or not messages:
         return
     try:
-        _retry_http(
+        resp = _retry_http(
             lambda: requests.post(
                 "https://api.line.me/v2/bot/message/push",
                 headers={
@@ -105,6 +121,18 @@ def push_messages(to: str, messages: list):
                 timeout=30,
             )
         )
+        if resp is not None and resp.status_code not in (200, 201):
+            short_to = to[:20] + "..."
+            msg = f"[LINE_PUSH] status={resp.status_code} to={short_to}"
+            logger.warning(msg)
+            print(msg)
+            if resp.status_code == 429:
+                _telegram_alert(f"⚠️ LINE push quota 已用完（429）\nto={short_to}\n請至 LINE Console 確認本月用量")
+            elif resp.status_code >= 500:
+                _telegram_alert(f"⚠️ LINE API 伺服器錯誤（{resp.status_code}）\nto={short_to}")
+        else:
+            short_to = to[:20] + "..."
+            logger.info("[LINE_PUSH] start to=%s len=%d", short_to, len(str(messages)))
     except Exception as exc:
         logger.warning("push_messages failed: %s", exc)
 
