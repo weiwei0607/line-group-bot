@@ -7,6 +7,7 @@ import os
 import re
 import random
 import threading
+import requests
 from goal_tracker import (
     get_cycle_info, get_goals, get_checkin_stats,
     set_nickname, update_last_activity,
@@ -40,6 +41,8 @@ from handlers.quick_replies import (
 )
 from handlers.quiz import handle_quiz
 from handlers.vote import handle_vote
+from handlers.notebook import handle_notebook_command
+from handlers.links import handle_link_command
 
 # LINE messaging configuration (local copy to avoid circular imports)
 _configuration = Configuration(access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""))
@@ -59,6 +62,15 @@ _HELP_TEXT = (
     "\n📌 待辦提醒\n"
     "提醒我 明天 要做XXX\n"
     "待辦 / 完成待辦 XXX\n"
+    "\n📝 記事本\n"
+    "記事 標題 內容\n"
+    "記事本 / 找記事 關鍵字\n"
+    "刪除記事 標題\n"
+    "\n🔗 連結庫\n"
+    "直接貼網址 → 自動存標題和摘要\n"
+    "連結庫 / 找連結 關鍵字\n"
+    "\n🎙️ 語音轉文字\n"
+    "直接傳語音訊息 → 自動轉文字\n"
     "\n🎲 趣味\n"
     "今日運勢 / 今日天蠍（任意星座）\n"
     "誰請客 / 抽籤 A / B\n"
@@ -267,6 +279,12 @@ def handle_message(event):
         threading.Thread(
             target=log_chat_message, args=(member_label, text), daemon=True
         ).start()
+
+    # ── 記事本 & 連結庫 ──
+    if handle_notebook_command(reply_token, text, member_label, reply):
+        return
+    if handle_link_command(reply_token, text, member_label, reply):
+        return
 
     # ── 指令清單 ──
     if text in ("指令", "說明", "幫助", "help", "功能"):
@@ -734,7 +752,66 @@ def handle_message(event):
 
 
 def handle_audio(event):
-    """Shazam: identify song from audio message."""
+    """Speech-to-text via Gemini, fallback to Shazam."""
+    reply_token = event.reply_token
+    message_id = event.message.id
+
+    # Download audio from LINE Content API
+    try:
+        token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+        r = requests.get(
+            f"https://api-data.line.me/v2/bot/message/{message_id}/content",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
+        )
+        r.raise_for_status()
+        audio_bytes = r.content
+    except Exception as e:
+        reply(reply_token, f"🎤 語音下載失敗：{e}")
+        return
+
+    # Transcribe with Gemini
+    transcript = ""
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if gemini_key and audio_bytes:
+        try:
+            import base64
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/"
+                f"models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            )
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": "請把這段語音轉成文字，只給轉錄結果，不要任何解釋。如果是中文請用繁體中文。"},
+                        {"inline_data": {"mime_type": "audio/mpeg", "data": audio_b64}},
+                    ]
+                }]
+            }
+            resp = requests.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                transcript = "".join(p.get("text", "") for p in parts).strip()
+        except Exception as e:
+            print(f"[STT] Gemini error: {e}")
+
+    if transcript:
+        reply(reply_token, f"🎙️ 語音轉文字：\n{transcript}")
+        # Optionally: treat transcript as a text command
+        # from linebot.v3.webhooks import TextMessageContent
+        # fake_event = type('FakeEvent', (), {
+        #     'reply_token': reply_token,
+        #     'message': type('FakeMsg', (), {'text': transcript, 'mention': None})(),
+        #     'source': event.source,
+        # })()
+        # handle_message(fake_event)
+        return
+
+    # Fallback: Shazam
     from handlers.media import handle_audio as _handle_audio
     _handle_audio(event, configuration)
 
