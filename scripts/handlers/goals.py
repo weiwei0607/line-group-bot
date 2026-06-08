@@ -100,13 +100,21 @@ def handle_set_goals(member, text):
 def handle_checkin(member, text, user_goals=None):
     # 沒設目標不能打卡
     if not user_goals:
-        # 診斷：告訴用户 bot 把他認成誰，以及 Sheets 裡有誰的目標
-        all_goals = get_goals()
-        goal_owners = list(all_goals.keys()) if all_goals else []
+        # 診斷：直接讀 Sheets 原始資料，繞過快取和异常捕獲
+        try:
+            from goal_tracker import _get_token, _sheets_get, get_cycle_info, GOAL_SHEET_ID
+            cid, day, total = get_cycle_info()
+            tok = _get_token()
+            raw_rows = _sheets_get(tok, "目標!A:C")
+            raw_owners = [r[1] for r in raw_rows[1:] if len(r) >= 3 and r[0] == cid]
+            sheet_ok = f"{len(raw_owners)} 人"
+        except Exception as e:
+            raw_owners = []
+            sheet_ok = f"讀取失敗：{type(e).__name__}: {str(e)[:80]}"
         return (
             f"你還沒設目標喔！先輸入「設目標：目標1 / 目標2」才能打卡 💪\n"
             f"\n🔍 診斷：我把你認成「{member}」\n"
-            f"📋 目前 Sheets 裡有目標的人：{', '.join(goal_owners) if goal_owners else '(沒有人)'}\n"
+            f"📋 Sheets 目標（週期 {cid}）：{', '.join(raw_owners) if raw_owners else sheet_ok}\n"
             f"\n如果名字對不上，請檢查「暱稱」或重新設目標 😊"
         )
 
