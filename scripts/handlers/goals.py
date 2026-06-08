@@ -100,9 +100,14 @@ def handle_set_goals(member, text):
 def handle_checkin(member, text, user_goals=None):
     # 沒設目標不能打卡
     if not user_goals:
+        # 診斷：告訴用户 bot 把他認成誰，以及 Sheets 裡有誰的目標
+        all_goals = get_goals()
+        goal_owners = list(all_goals.keys()) if all_goals else []
         return (
-            "你還沒設目標喔！先輸入「設目標：目標1 / 目標2」才能打卡 💪\n"
-            "不知道設什麼？可以說「幫我想目標」讓我幫你想 😊"
+            f"你還沒設目標喔！先輸入「設目標：目標1 / 目標2」才能打卡 💪\n"
+            f"\n🔍 診斷：我把你認成「{member}」\n"
+            f"📋 目前 Sheets 裡有目標的人：{', '.join(goal_owners) if goal_owners else '(沒有人)'}\n"
+            f"\n如果名字對不上，請檢查「暱稱」或重新設目標 😊"
         )
 
     content = re.sub(r'^打卡\s*', '', text).strip() or "打卡"

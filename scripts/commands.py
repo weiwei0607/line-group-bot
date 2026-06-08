@@ -252,6 +252,12 @@ def handle_message(event):
     group_id = getattr(source, 'group_id', None)
     user_id = getattr(source, 'user_id', None)
 
+    # ── 去除 @bot 前綴（群組裡 @小棉襖 打卡 xxx 也能正常觸發）──
+    for prefix in (f"@{BOT_DISPLAY_NAME}", f"@{BOT_NAME}", "@小棉襖"):
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip()
+            break
+
     # Rate limiting (30 requests / 60s per user)
     if user_id and not rate_limit_check(user_id, max_requests=30, window_seconds=60):
         reply(reply_token, "⏳ 你發太快了，請稍後再試 👋")
