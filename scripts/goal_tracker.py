@@ -32,6 +32,11 @@ _token_cache = {"token": None, "expires_at": 0}
 _token_lock = threading.Lock()
 
 
+class GoogleAuthError(RuntimeError):
+    """Raised when Google OAuth token refresh fails (e.g. expired/invalid refresh_token)."""
+    pass
+
+
 def _get_token():
     now = time.time()
     with _token_lock:
@@ -48,11 +53,11 @@ def _get_token():
         if not r.ok:
             err = data.get("error_description") or data.get("error") or f"HTTP {r.status_code}"
             logging.error("Google OAuth failed: %s", err)
-            raise RuntimeError(f"Google OAuth failed: {err}")
+            raise GoogleAuthError(f"Google OAuth failed: {err}")
         token = data.get("access_token")
         if not token:
             logging.error("Google OAuth returned no access_token: %s", data)
-            raise RuntimeError("Google OAuth returned no access_token")
+            raise GoogleAuthError("Google OAuth returned no access_token")
         with _token_lock:
             _token_cache["token"] = token
             _token_cache["expires_at"] = now + data.get("expires_in", 3600)
@@ -354,7 +359,8 @@ def get_goals(cycle_id=None) -> dict:
 # ─── Check-ins ────────────────────────────────────────────
 
 def add_checkin(member, content) -> tuple:
-    """Returns (day_in_cycle, total_days) or (0, 0) on error."""
+    """Returns (day_in_cycle, total_days) or (0, 0) on error.
+    Returns (-1, -1) specifically when Google auth token has expired."""
     if not GOAL_SHEET_ID:
         return 0, 0
     try:
@@ -364,6 +370,8 @@ def add_checkin(member, content) -> tuple:
         date_str = now.strftime("%Y-%m-%d %H:%M")
         _sheets_append(token, "打卡!A:E", [[date_str, cycle_id, day, member, content]])
         return day, total
+    except GoogleAuthError:
+        return -1, -1
     except Exception:
         return 0, 0
 

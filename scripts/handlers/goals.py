@@ -100,6 +100,18 @@ def handle_set_goals(member, text):
 def handle_checkin(member, text, user_goals=None):
     # 沒設目標不能打卡
     if not user_goals:
+        # 先檢查是不是 Google Auth 過期導致讀不到目標
+        try:
+            from goal_tracker import _get_token, GoogleAuthError
+            _get_token()
+        except GoogleAuthError as e:
+            return (
+                "⚠️ 打卡失敗：Google 認證已過期！\n"
+                "請聯繫管理員更新 GOOGLE_REFRESH_TOKEN 🔑\n"
+                f"（錯誤：{str(e)[:80]}）"
+            )
+        except Exception:
+            pass  # 其他錯誤忽略，繼續顯示正常提示
         # 診斷：直接讀 Sheets 原始資料，繞過快取和异常捕獲
         try:
             from goal_tracker import _get_token, _sheets_get, get_cycle_info, GOAL_SHEET_ID
@@ -120,6 +132,11 @@ def handle_checkin(member, text, user_goals=None):
 
     content = re.sub(r'^打卡\s*', '', text).strip() or "打卡"
     day, total = add_checkin(member, content)
+    if day == -1:
+        return (
+            "⚠️ 打卡失敗：Google 認證已過期！\n"
+            "請聯繫管理員更新 GOOGLE_REFRESH_TOKEN 🔑"
+        )
     if day == 0:
         return "打卡失敗 😢 等一下再試試？"
 
