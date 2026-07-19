@@ -188,21 +188,20 @@ SQLite (bot_state.db + tts_store.db)
 
 ```
 line-group-bot/
-├── app.py                     # Flask 入口
-├── line_webhook.py            # Webhook 路由與驗證
 ├── requirements.txt           # Python 依賴
 ├── render.yaml                # Render 部署設定
+├── Procfile                   # 啟動指令（與 render.yaml 相同）
 ├── build.sh                   # 安裝 ffmpeg（imageio-ffmpeg fallback）
 ├── scripts/
+│   ├── line_webhook.py        # Flask 入口：Webhook 路由與驗證
 │   ├── commands.py            # 指令分發核心（50+ 指令）
 │   ├── api_helpers.py         # AI / TTS / 外部 API 整合
 │   ├── weather.py             # 天氣查詢（Open-Meteo + wttr.in）
 │   ├── state.py               # SQLite 狀態管理
 │   ├── tts_store.py           # TTS 音檔 SQLite 持久化
-│   └── goal_tracker.py        # 十日目標與打卡邏輯
-├── shared/
-│   ├── line_push.py           # LINE push/reply 封裝
-│   └── alerts.py              # Telegram 監控告警
+│   ├── goal_tracker.py        # 十日目標與打卡邏輯
+│   ├── handlers/              # 各類指令 handler（遊戲、待辦、投票等）
+│   └── shared/                # line_push、alerts、retry、security
 └── data/                      # SQLite 資料庫
 ```
 
