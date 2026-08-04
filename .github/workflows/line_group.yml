@@ -1,8 +1,7 @@
 name: LINE Group Daily Message
 
 "on":
-  schedule:
-    - cron: '0 3 * * *'   # 每天 11:00 CST
+  # 每天 11:00 自動推播已停用（消息過多），保留手動觸發
   workflow_dispatch:
 
 jobs:

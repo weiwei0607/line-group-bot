@@ -1,9 +1,7 @@
 name: 沉默偵測
 
 on:
-  schedule:
-    # 每 6 小時檢查一次：0/6/12/18 點 UTC = 8/14/20/2 點台灣時間
-    - cron: "0 0,6,12,18 * * *"
+  # 每 6 小時的冷場偵測已停用（APScheduler 每天 12:00 已在做，避免重複），保留手動觸發
   workflow_dispatch:
 
 jobs:

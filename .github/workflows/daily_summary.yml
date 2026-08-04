@@ -1,9 +1,7 @@
 name: 每日群組總結
 
 on:
-  schedule:
-    # 每天 23:30 台灣時間 = 15:30 UTC
-    - cron: "30 15 * * *"
+  # 每天 23:30 總結自動推播已停用（整合消息，減少轟炸），保留手動觸發
   workflow_dispatch:
 
 jobs:

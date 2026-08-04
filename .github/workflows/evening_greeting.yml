@@ -1,9 +1,7 @@
 name: 晚安問候
 
 on:
-  schedule:
-    # 每天 22:00 Asia/Taipei = 14:00 UTC
-    - cron: "0 14 * * *"
+  # 每天 22:00 晚安自動推播已停用（整合消息，減少轟炸），保留手動觸發
   workflow_dispatch:
 
 jobs:
