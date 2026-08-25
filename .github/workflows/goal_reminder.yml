@@ -1,7 +1,12 @@
 name: 十日目標提醒
 
 on:
-  workflow_dispatch:  # 改由 APScheduler 在 Render 上準時執行，此 workflow 保留供手動觸發
+  # 原本註解說「改由 APScheduler 在 Render 上執行」，但那個排程其實是死的
+  # （from state import cron_is_done 會 ImportError），所以這個提醒長期沒在跑。
+  # 排程改回這裡，對應原本 APScheduler 的台北 21:00。
+  schedule:
+    - cron: '0 13 * * *'   # 21:00 CST
+  workflow_dispatch:
 
 jobs:
   remind:

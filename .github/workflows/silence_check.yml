@@ -1,7 +1,12 @@
 name: 沉默偵測
 
 on:
-  # 每 6 小時的冷場偵測已停用（APScheduler 每天 12:00 已在做，避免重複），保留手動觸發
+  # 原本停用是因為「APScheduler 每天 12:00 已在做」，但那個排程其實是死的
+  # （from state import cron_is_done 會 ImportError），所以冷場偵測長期沒在跑。
+  # 改回每天一次，時間對齊原本 APScheduler 的台北 12:00。
+  # 刻意不恢復原本的每 6 小時，避免又變成訊息轟炸。
+  schedule:
+    - cron: '0 4 * * *'    # 12:00 CST
   workflow_dispatch:
 
 jobs:
