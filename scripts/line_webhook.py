@@ -378,20 +378,44 @@ def handle_exception(e):
     traceback.print_exc()
 
 
+# 佔住排程鎖的 socket。必須保持模組層級的參照，讓它跟著 process 活著。
+_SCHEDULER_LOCK_SOCKET = None
+
+
 def _is_scheduler_primary() -> bool:
-    """Use a localhost port bind to ensure only one process starts the scheduler."""
+    """用綁 localhost 埠的方式確保只有一個 process 會啟動排程。
+
+    這個 socket 一定要一直開著。先前寫成 finally: s.close()，鎖只存在幾微秒，
+    後面每個 process 都能重新綁成功，等於沒有鎖。目前 gunicorn 是 --workers 1
+    所以還沒出事，但只要 worker 數量調大或新舊 process 短暫重疊，
+    每個排程工作就會被執行多次（群組收到重複推播）。
+    """
+    global _SCHEDULER_LOCK_SOCKET
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.bind(("127.0.0.1", 50000))
-        return True
     except socket.error:
-        return False
-    finally:
         s.close()
+        return False
+    _SCHEDULER_LOCK_SOCKET = s  # 故意不關，持有到 process 結束
+    return True
 
 
 def _start_scheduler():
+    """行程內排程，預設關閉。
+
+    這些工作先前全部是死的：每個都寫 `from state import cron_is_done`，
+    但 state.py 根本沒有這些函式，一觸發就 ImportError（而且 import 在 try
+    之外，連 Telegram 警報都發不出來），所以只是靜靜什麼都沒做。
+
+    實際在跑的是 GitHub Actions（早安走 /daily-push，其餘走各自的 workflow）。
+    因此這裡就算修好也不能直接打開，兩邊都跑會讓群組收到重複訊息。
+    要啟用得先確認對應的 workflow 已停用，再設 ENABLE_INPROCESS_SCHEDULER=1。
+    """
+    if os.environ.get("ENABLE_INPROCESS_SCHEDULER", "") != "1":
+        logging.info("In-process scheduler disabled (GitHub Actions handles cron)")
+        return
     if not _is_scheduler_primary():
         logging.info("Scheduler skipped: another process already holds the lock")
         return
@@ -402,19 +426,18 @@ def _start_scheduler():
         tz = pytz.timezone("Asia/Taipei")
         scheduler = BackgroundScheduler(timezone=tz)
         def _safe_morning():
-            from state import cron_is_done, cron_mark_done
-            if cron_is_done("morning_greeting"):
+            from tts_store import cron_try_mark_done
+            if not cron_try_mark_done("morning_greeting"):
                 return
             try:
                 send_morning_greeting()
-                cron_mark_done("morning_greeting")
             except Exception as e:
                 send_telegram_alert(f"早安提醒失敗：{e}")
         scheduler.add_job(_safe_morning, CronTrigger(hour=8, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _weekly_sunday_push():
-            from state import cron_is_done, cron_mark_done
-            if cron_is_done("weekly_sunday_push"):
+            from tts_store import cron_try_mark_done
+            if not cron_try_mark_done("weekly_sunday_push"):
                 return
             try:
                 scores = get_quiz_scores()
@@ -436,15 +459,14 @@ def _start_scheduler():
                     )
                     if summary:
                         push_to_group(f"📝 本週群組回顧\n\n{summary}")
-                cron_mark_done("weekly_sunday_push")
             except Exception as e:
                 send_telegram_alert(f"週日推播失敗：{e}")
 
         scheduler.add_job(_weekly_sunday_push, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _check_cycle_end():
-            from state import cron_is_done, cron_mark_done
-            if cron_is_done("check_cycle_end"):
+            from tts_store import cron_try_mark_done
+            if not cron_try_mark_done("check_cycle_end"):
                 return
             try:
                 from goal_tracker import get_cycle_info, build_summary_text
@@ -452,15 +474,14 @@ def _start_scheduler():
                 if day == total:
                     summary = build_summary_text()
                     push_to_group(f"🎊 十日目標週期結束！\n\n{summary}")
-                cron_mark_done("check_cycle_end")
             except Exception as e:
                 send_telegram_alert(f"週期結束檢查失敗：{e}")
 
         scheduler.add_job(_check_cycle_end, CronTrigger(hour=22, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _silence_check():
-            from state import cron_is_done, cron_mark_done
-            if cron_is_done("silence_check"):
+            from tts_store import cron_try_mark_done
+            if not cron_try_mark_done("silence_check"):
                 return
             try:
                 last = get_last_activity()
@@ -473,20 +494,18 @@ def _start_scheduler():
                         "可以問問題或發起話題，繁體中文，不超過60字"
                     ) or "欸你們還活著嗎 👀 說點什麼吧！"
                     push_to_group(msg)
-                cron_mark_done("silence_check")
             except Exception as e:
                 send_telegram_alert(f"沉默偵測失敗：{e}")
 
         scheduler.add_job(_silence_check, CronTrigger(hour=12, minute=0, timezone=tz), misfire_grace_time=3600, max_instances=1, coalesce=True)
 
         def _goal_reminder():
-            from state import cron_is_done, cron_mark_done
-            if cron_is_done("goal_reminder"):
+            from tts_store import cron_try_mark_done
+            if not cron_try_mark_done("goal_reminder"):
                 return
             try:
                 from goal_reminder import main as goal_reminder_main
                 goal_reminder_main()
-                cron_mark_done("goal_reminder")
             except Exception as e:
                 send_telegram_alert(f"十日目標提醒失敗：{e}")
 
