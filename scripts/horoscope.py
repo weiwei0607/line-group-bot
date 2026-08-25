@@ -80,7 +80,9 @@ def fetch_news() -> str:
         except Exception as _exc:
             logger.warning("API error: %s", _exc)
             pass
-    return call_gemini("給我5則今天台灣的重要新聞頭條，每則一行，用繁體中文") or "新聞暫時無法取得"
+    # 新聞抓不到就明說，不要讓 Gemini 編。模型沒有即時資訊，
+    # 生出來的「今日頭條」是假的，推到群裡會被當真。
+    return "📰 目前抓不到新聞來源，等一下再試一次吧"
 
 
 # ─── Shazam ───────────────────────────────────────────────

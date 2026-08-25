@@ -235,9 +235,25 @@ def daily_push():
     return "OK"
 
 
+def _debug_guard():
+    """除錯端點的門禁。
+
+    /test-push-audio 會真的推播到 LINE 群、/test-ffmpeg 會開 subprocess，
+    先前兩個都沒有任何驗證，知道 Render 網址的人就能觸發。
+    現在要帶 ?key= 且對得上 DEBUG_ENDPOINT_KEY 才放行；
+    沒設這個環境變數就等於整組關閉。
+    """
+    expected = os.environ.get("DEBUG_ENDPOINT_KEY", "")
+    if not expected:
+        abort(404)
+    if request.args.get("key", "") != expected:
+        abort(404)
+
+
 @app.route("/test-push-audio")
 def test_push_audio():
     """Push a pre-generated standard 44.1kHz MP3 to the group to test if AudioMessage works in push."""
+    _debug_guard()
     try:
         from line_push import push_messages
         from linebot.v3.messaging import AudioMessage
@@ -281,6 +297,7 @@ def test_tts():
 @app.route("/test-ffmpeg")
 def test_ffmpeg():
     """Test ffmpeg availability and conversion on Render."""
+    _debug_guard()
     try:
         import subprocess, imageio_ffmpeg, os, tempfile
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
