@@ -25,7 +25,7 @@ def _retry_http(fn, max_retries=3, backoff=2):
 # ─── Groq ─────────────────────────────────────────────────
 
 def call_groq(prompt: str) -> str | None:
-    """呼叫 Groq (llama-3.3-70b-versatile)，回傳文字或 None。"""
+    """呼叫 Groq (openai/gpt-oss-120b)，回傳文字或 None。"""
     key = os.environ.get("GROQ_API_KEY", "")
     if not key:
         return None
@@ -34,7 +34,7 @@ def call_groq(prompt: str) -> str | None:
         resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
+            json={"model": "openai/gpt-oss-120b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
             timeout=10,
         )
         return resp.json()["choices"][0]["message"]["content"].strip()
