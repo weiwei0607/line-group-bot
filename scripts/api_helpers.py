@@ -267,9 +267,9 @@ def fetch_streaming(title: str) -> str:
             break
     if d is _QUOTA:
         return _QUOTA_MSG
-    _gemini_streaming = lambda: call_gemini(
-        f"「{title}」這部電影/劇現在在哪些平台可以看？列出平台名稱，繁體中文回答，格式：🍿《{title}》可在：• Netflix • Disney+ 等"
-    ) or f"🍿 找不到「{title}」的串流資訊"
+    # 不用 Gemini 補。上架平台會變動，模型講不準，而且產出的格式跟真實
+    # 查詢結果一模一樣，使用者完全分不出來。
+    _gemini_streaming = lambda: f"🍿 查不到「{title}」的串流資訊"
     if not d:
         return _gemini_streaming()
     try:
@@ -579,7 +579,8 @@ def fetch_calories_burned(activity: str, duration_min: int = 30) -> str:
     if d is _QUOTA:
         return _QUOTA_MSG
     if not d or not isinstance(d, list):
-        return call_gemini(f"做「{activity}」{duration_min}分鐘大約消耗多少卡路里？用繁體中文簡短回答")
+        # 不用 Gemini 補。熱量是有標準答案的數字，模型編出來的會被當真。
+        return f"🏃 查不到「{activity}」的熱量資料，換個說法或稍後再試"
     lines = [f"🏃 消耗熱量：{activity}（{duration_min}分鐘）\n"]
     for it in d[:3]:
         cal_h = it.get("calories_per_hour", 0)
@@ -606,8 +607,11 @@ def fetch_gold_price() -> str:
         lines = [f"🪙 今日金價\n\n黃金：${gold} USD/盎司"]
         try:
             r2 = requests.get("https://open.er-api.com/v6/latest/USD", timeout=8)
-            rate = r2.json()["rates"].get("TWD", 31)
-            lines.append(f"約 NT$ {round(float(gold) * rate):,} 元/盎司")
+            rate = r2.json()["rates"].get("TWD")
+            # 匯率抓不到就整行不顯示。原本預設值寫死 31，等於拿假匯率算出
+            # 一個看起來很精確的台幣金額。
+            if rate:
+                lines.append(f"約 NT$ {round(float(gold) * float(rate)):,} 元/盎司")
         except Exception as _exc:
             logger.warning("API error: %s", _exc)
             pass
@@ -631,7 +635,8 @@ def fetch_number_fact() -> str:
     except Exception as _exc:
         logger.warning("API error: %s", _exc)
         pass
-    return call_gemini("給我一個關於數字的有趣冷知識，用繁體中文") or "數字冷知識暫時失靈"
+    ai = call_gemini("給我一個關於數字的有趣冷知識，用繁體中文")
+    return f"🔢 {ai}\n\n（資料來源暫時失聯，這則由 AI 生成，僅供參考）" if ai else "數字冷知識暫時失靈"
 
 
 def fetch_astronomy_fact() -> str:
@@ -643,7 +648,8 @@ def fetch_astronomy_fact() -> str:
         if fact:
             zh = smart_translate(fact)
             return f"🔭 {zh}"
-    return call_gemini("給我一個有趣的天文或科學冷知識，用繁體中文") or "天文冷知識暫時失靈"
+    ai = call_gemini("給我一個有趣的天文或科學冷知識，用繁體中文")
+    return f"🔭 {ai}\n\n（資料來源暫時失聯，這則由 AI 生成，僅供參考）" if ai else "天文冷知識暫時失靈"
 
 
 def fetch_recipe_by_ingredient(ingredients: str) -> str:
@@ -909,20 +915,29 @@ def fetch_spanish(word: str) -> str:
     except Exception as _exc:
         logger.warning("API error: %s", _exc)
         pass
-    return call_gemini(
+    ai = call_gemini(
         f"用繁體中文解釋西班牙文單字「{word}」的意思、詞性和一個例句"
-    ) or f"找不到「{word}」的資料"
+    )
+    # 保留這個 fallback：解釋單字本來就是 LLM 擅長的事。但要讓使用者知道
+    # 這不是字典資料，音標之類的細節可能不準。
+    return f"🇪🇸 {ai}\n\n（查不到字典資料，這則由 AI 解釋，發音細節請再確認）" if ai else f"找不到「{word}」的資料"
 
 
 def fetch_daily_spanish() -> str:
-    return call_gemini(
+    """每日西文單字。
+
+    這則本來就是請 AI 生成教學內容，不是查詢事實，所以保留。
+    但要標示出處，免得使用者把例句和記憶技巧當成教材權威。
+    """
+    ai = call_gemini(
         "給我一個 A1-A2 等級的西班牙文單字，格式：\n"
         "📖 單字：xxx\n"
         "詞性：xxx\n"
         "中文意思：xxx\n"
         "例句：xxx（附中文翻譯）\n"
         "記憶技巧：一句話"
-    ) or "今日西文單字查詢失敗"
+    )
+    return f"{ai}\n\n（AI 生成的練習內容，拿不準的字建議再查一次字典）" if ai else "今日西文單字查詢失敗"
 
 
 def fetch_pokemon_detail(name: str) -> str:
