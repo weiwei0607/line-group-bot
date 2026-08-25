@@ -783,6 +783,8 @@ def _fetch_birthdays_for_greeting(today_mmdd: str):
 
 
 def send_morning_greeting():
+    from festivals import get_festival
+
     today = datetime.now(TW_TZ)
     weekdays = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
     weekday = weekdays[today.weekday()]
@@ -798,11 +800,9 @@ def send_morning_greeting():
 
     birthday_str = f"今天是 {'、'.join(birthday_nicks)} 的生日！" if birthday_nicks else ""
 
-    holiday_hint = call_gemini(
-        f"今天是{date_str}，台灣有沒有節日或特別紀念日？"
-        "如果有，只回應節日名稱（例如「端午節」「父親節」）；沒有就回「無」。"
-    ) or "無"
-    holiday_str = "" if "無" in holiday_hint else f"今天是{holiday_hint.strip()}！"
+    # 節日查表，不問 Gemini（它會編，例如把 8/25 說成七夕）
+    holiday = get_festival(today)
+    holiday_str = f"今天是{holiday}！" if holiday else ""
 
     msg = call_gemini(
         f"今天是{date_str}。{weather_info}\n"
@@ -810,6 +810,8 @@ def send_morning_greeting():
         "幫我寫一則給朋友群的早安問候，"
         "輕鬆活潑、120字以內、繁體中文，"
         "加入天氣提醒，如有節日或生日也自然帶入。"
+        "上面沒有寫節日就代表今天沒有節日，"
+        "絕對不要自己補上任何節日、紀念日或提到節慶，也不要猜。"
         "結尾加一個 emoji。不要加大家好。"
     ) or f"☀️ 早安！今天是{date_str}，{weather_info or '新的一天開始了'}！{birthday_str}"
 
