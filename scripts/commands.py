@@ -30,7 +30,7 @@ from weather import (
 )
 from dispatch import try_dispatch
 from handlers.goals import (
-    handle_set_goals, handle_checkin, handle_view_goals,
+    handle_set_goals, validate_goals_input, handle_checkin, handle_view_goals,
     handle_cycle_progress, handle_today_checkins, handle_last_cycle,
     handle_suggest_goals,
 )
@@ -471,10 +471,20 @@ def handle_message(event):
             reply_text = f"不認識這個星座，請用：\n{signs}"
 
     # ── 十日目標：設目標 ──
-    # 原本硬性要求冒號，打「設目標 讀英文」bot 會完全不回應，看起來像壞掉。
-    # 現在冒號、空格、或直接接內容都吃，格式不對也會回提示而不是沉默。
-    elif re.match(r'^設目標', text):
-        reply_text = handle_set_goals(member_label, text)
+    # 原本硬性要求冒號，打「設目標 讀英文」bot 會完全不回應，看起來像壞掉；
+    # 但如果任何「設目標」開頭都算數，會把「設目標會不會很難？」這種問句
+    # 當成指令，寫爛資料進 Sheet 還回報「設定完成」。
+    # 折衷：要求冒號、全形冒號或空白分隔，純問句不會誤觸發；
+    # 光打「設目標」也給提示，不再沉默。
+    elif re.match(r'^設目標(?:[：:]|\s|$)', text):
+        goals, err = validate_goals_input(text)
+        if err:
+            reply_text = err
+        else:
+            # 寫 Sheets 可能因重試花到數十秒，用背景執行緒 + push 結果，
+            # 避免使用者等太久或 reply_token 過期。
+            _async_push(reply_token, "🎯 設定中...", handle_set_goals, member_label, goals)
+            return
 
     # ── 十日目標：打卡 ──
     elif text.startswith("打卡"):
