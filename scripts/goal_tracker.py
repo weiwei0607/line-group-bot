@@ -10,6 +10,7 @@ Sheets 結構:
 import os
 import re
 import time
+import logging
 import threading
 import calendar
 import requests
@@ -326,6 +327,8 @@ def set_goals(member, goals: list, cycle_id: str | None = None) -> bool:
         _goals_cache.pop(cycle_id, None)
         return True
     except Exception:
+        # 原本這裡直接吞掉，失敗完全查不到原因
+        logging.exception("set_goals 失敗 member=%s cycle=%s", member, cycle_id)
         return False
 
 

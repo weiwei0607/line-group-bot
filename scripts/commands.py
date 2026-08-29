@@ -471,7 +471,9 @@ def handle_message(event):
             reply_text = f"不認識這個星座，請用：\n{signs}"
 
     # ── 十日目標：設目標 ──
-    elif re.match(r'^設目標[：:]', text):
+    # 原本硬性要求冒號，打「設目標 讀英文」bot 會完全不回應，看起來像壞掉。
+    # 現在冒號、空格、或直接接內容都吃，格式不對也會回提示而不是沉默。
+    elif re.match(r'^設目標', text):
         reply_text = handle_set_goals(member_label, text)
 
     # ── 十日目標：打卡 ──

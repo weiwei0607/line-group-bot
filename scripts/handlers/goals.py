@@ -5,7 +5,6 @@ Extracted from api_helpers.py to reduce file size.
 
 import re
 import random
-import threading
 from datetime import datetime
 from goal_tracker import (
     TW_TZ,
@@ -67,7 +66,7 @@ def parse_goals(text_after_prefix):
 
 
 def handle_set_goals(member, text):
-    after = re.sub(r'^設目標[：:]\s*', '', text).strip()
+    after = re.sub(r'^設目標[：:\s]*', '', text).strip()
     if not after:
         return "目標內容不能空白！\n格式：設目標：目標1 / 目標2 / 目標3"
 
@@ -78,22 +77,47 @@ def handle_set_goals(member, text):
     cycle_id, day, total = get_cycle_info()
     goals_preview = "\n".join(f"  {i+1}. {g}" for i, g in enumerate(goals))
 
+    # 同步寫入才知道成功與否。之前用背景執行緒又不看結果，
+    # 導致寫入失敗也照回「設定完成」，使用者以為設好了其實沒有。
     if day >= total:
         # 最後一天：存到下一週期
         next_id = get_next_cycle_id()
         next_start = get_next_cycle_start()
-        threading.Thread(target=set_goals, args=(member, goals, next_id), daemon=True).start()
+        ok = set_goals(member, goals, next_id)
+        if not ok:
+            return _set_goals_failed()
         return (
             f"✅ {member} 的下輪目標設定完成！\n\n"
             f"{goals_preview}\n\n"
             f"📅 {next_start} 週期開始生效 🎯"
         )
 
-    threading.Thread(target=set_goals, args=(member, goals), daemon=True).start()
+    ok = set_goals(member, goals)
+    if not ok:
+        return _set_goals_failed()
     return (
         f"✅ {member} 的十日目標設定完成！\n\n"
         f"{goals_preview}\n\n"
         f"📅 現在第 {day}/{total} 天，加油！💪"
+    )
+
+
+def _set_goals_failed():
+    """寫入失敗時給出可行動的訊息，不要假裝成功。"""
+    try:
+        from goal_tracker import _get_token, GoogleAuthError
+        _get_token()
+    except GoogleAuthError as e:
+        return (
+            "⚠️ 目標沒存進去：Google 認證過期了\n"
+            "請聯繫管理員更新 GOOGLE_REFRESH_TOKEN 🔑\n"
+            f"（{str(e)[:80]}）"
+        )
+    except Exception:
+        pass
+    return (
+        "⚠️ 目標沒存進去，剛剛寫入試算表失敗 😢\n"
+        "等一下再試一次；還是不行就跟管理員說。"
     )
 
 
