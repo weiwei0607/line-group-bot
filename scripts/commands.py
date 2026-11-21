@@ -276,6 +276,21 @@ def handle_message(event):
             addressed = True
             break
 
+    # ── 引用（回覆）小棉襖的訊息：視為點名，並把被引用那句帶進 context ──
+    #    LINE：message.quotedMessageId（SDK: quoted_message_id）。引用別人／查不到／Sheet 失敗 → 照舊邏輯。
+    quoted_text = None
+    try:
+        import sent_messages
+        sent_messages.current_group.set(group_id)
+        qid = getattr(event.message, "quoted_message_id", None)
+        if isinstance(qid, str) and qid:
+            hit = sent_messages.lookup(qid, group_id)
+            if hit:
+                addressed = True
+                quoted_text = hit.get("text") or None
+    except Exception as exc:
+        _logging.warning("quoted-reply check failed (ignored): %s", exc)
+
     # ── 明確的「前綴＋參數」指令（找歌/查電影/…）：要比 try_dispatch 先跑，
     #    否則 try_dispatch 裡不帶 ^ 的字（貓貓、笑話、NASA…）會搶走「查電影 貓貓」──
     cmd_reply = run_regex_commands(text)
@@ -771,7 +786,7 @@ def handle_message(event):
     if reply_text is None:
         if (addressed or BOT_NAME in text or BOT_DISPLAY_NAME in text
               or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
-            reply_text = handle_mention(text, member=member_label)
+            reply_text = handle_mention(text, member=member_label, quoted=quoted_text)
             was_conversation = True
 
     if not reply_text and not reply_image_url:

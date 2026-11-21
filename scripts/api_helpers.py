@@ -1091,7 +1091,7 @@ def pre_llm_guard(text: str, now=None):
     return None
 
 
-def handle_mention(text, member=None):
+def handle_mention(text, member=None, quoted=None):
     guarded = pre_llm_guard(text)
     if guarded:
         return guarded
@@ -1116,6 +1116,7 @@ def handle_mention(text, member=None):
     prompt = (
         f"{context}"
         f"{'傳訊息的是 ' + member + '，' if member else ''}"
+        f"{'使用者在回覆你之前說的這句：「' + quoted + '」' + chr(10) if quoted else ''}"
         f"他說：「{text}」\n"
         f"請結合上面的對話脈絡回應。"
     )

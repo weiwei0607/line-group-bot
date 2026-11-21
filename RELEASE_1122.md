@@ -75,3 +75,44 @@
 - 全部：`git revert` 本次 commit（或 Render Dashboard 回上一個 deploy）。只想關 threads：刪 `gunicorn.conf.py`。
 - keep_alive 要回舊行為：把 `/ping` 改回 `/health`。
 - 沒有資料遷移，沒有新分頁（「對話摘要」分頁屬於記憶那個 commit，可保留）。
+
+---
+
+# 追加：引用（回覆）小棉襖＝點名（分支 feat/quoted-reply，從 main faae2ea 切出，尚未 push／merge／部署）
+
+## 改了什麼
+依 LINE 官方文件（Messaging API reference，已逐字確認）：text message event 的 `message.quotedMessageId`（String，只在引用過去訊息時出現；SDK 欄位 `quoted_message_id`）；
+reply／push 成功回 `{"sentMessages":[{"id": Number, "quoteToken": ...}]}`，順序對應送出的 messages。
+- 新增 `scripts/sent_messages.py`：bot 每次 reply／push 成功，把 sentMessages 的 id → (群組, 文字前 200 字, 時間) 記下。
+  記憶體（200 筆）＋同一份試算表新分頁「bot訊息」環狀緩衝（第 N 筆寫第 ((N-1)%200)+2 列，自動覆蓋最舊的；分頁不存在會自己建）。重啟後從 Sheet 查。不新增任何服務／env。
+- `shared/line_push.py`：`_reply_messages`、`push_messages` 成功後呼叫記錄（背景 thread、全包 try/except，失敗只 log，不影響送訊）。
+- `commands.handle_message`：有 `quoted_message_id` 且在表裡（且群組相符）→ 視同 @（`addressed=True`），被引用的那句帶進 prompt：「使用者在回覆你之前說的這句：「…」」。
+  引用別人、表沒資料、Sheet 讀失敗 → 照原本邏輯（沒提到小棉襖就不觸發）。明確指令（如「查電影 X」）仍優先照指令跑。
+- `api_helpers.handle_mention(text, member, quoted=None)`。
+- 限制：只記錄這個版本上線之後送出的訊息；上線前的舊訊息被引用不會觸發。bot 送出的圖片／語音記成 `[image]`／`[audio]`（引用它也算點名，但沒有文字可帶入）。
+
+## 成本影響
+- 每則 bot 訊息（reply 或 push）多 1 次 Sheets 寫入（背景）；每次 Render 重啟後第一次寫入多 1 次讀取（找目前序號）。
+- 只有「使用者引用了一則不在記憶體裡的訊息」才會讀 Sheet，且 60 秒內最多讀 1 次。
+- 估算（假設值，非實測）：群組 bot 回覆約 50–150 則／天＋推播（早安、提醒）約 10 則／天 ≈ 60–160 次寫入／天，平均每分鐘 0.1 次。
+  Google Sheets API 免費、沒有每日上限，只有速率限制：每專案每分鐘 300 次讀、300 次寫，每使用者每分鐘 60 次。目前每則使用者訊息本來就有 1 次寫入（聊天記錄）加幾次讀取，新增量同量級，離上限差兩個數量級。
+  不涉及 LINE push 額度（沒有新增任何 push）。上線後用 Render Logs 搜 `sent_messages persist failed` 看有沒有失敗。
+
+## 測試
+`cd line-group-bot && python3 -W ignore -m unittest discover -s tests`：67 個全過（既有 46＋新 `tests/test_quoted_reply.py` 21 個，全 mock）。
+涵蓋：引用 bot → 觸發並帶入被引用文字；引用別人不觸發；表沒資料；Sheet 讀／寫失敗不影響正常回覆；200 筆環狀覆蓋；重啟後序號接續；群組不符；sentMessages 順序對應；回應格式異常；reply 失敗不記錄；記錄丟例外 reply 仍成功；引用 bot 但訊息是明確指令仍走指令。
+未實測：真實 LINE 的引用事件（靜態＋mock），請照下面群組驗證。
+
+## 上線指令（她審過之後）
+1. `git checkout main && git merge feat/quoted-reply && git push`（Render 自動部署；注意 feat/quoted-reply 從 faae2ea 切出，若 fix/persistent-memory 尚未 merge 要先 merge 那條）。
+2. 不需新 env。OAuth 要有建分頁權限；若沒有就手動在試算表新增分頁「bot訊息」（程式會寫第 2 列起）。
+
+## 群組驗證
+1. 部署後 `@小棉襖 嗨` → 有回覆；試算表出現「bot訊息」分頁，A2 起有一列（seq、message_id、群組、文字、時間）。
+2. 長按小棉襖那則回覆 → 回覆（引用），只打「真的嗎」不加 @ → 小棉襖要回，且內容接得上被引用那句。
+3. 引用另一個人的訊息回「真的嗎」→ 小棉襖不應反應。
+4. Render 手動 Restart 後，再引用重啟前（但上線後）的小棉襖訊息 → 仍會回（驗證從 Sheet 讀）。
+5. Render Logs 搜 `quoted-reply check failed`、`sent_messages` 看有沒有警告。
+
+## 回滾
+- `git revert` 該 commit（或 Render 回上一個 deploy）：行為回到引用不算點名。「bot訊息」分頁可保留或刪除，不影響其他分頁，沒有資料遷移。

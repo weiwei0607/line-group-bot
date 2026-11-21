@@ -65,7 +65,17 @@ def _reply_messages(reply_token: str, messages: list) -> bool:
         logger.warning("[LINE_REPLY] status=%s body=%s", resp.status_code, body)
         _alert_once(f"reply_{resp.status_code}", f"⚠️ LINE reply 失敗 HTTP {resp.status_code}：{body}")
         return False
+    _record_sent(resp, messages, None)
     return True
+
+
+def _record_sent(resp, messages, group_id):
+    """把 bot 送出的 message id 記下來（用來判斷使用者是不是在引用小棉襖）。失敗不影響送訊。"""
+    try:
+        import sent_messages
+        sent_messages.record_from_response(resp, messages, group_id)
+    except Exception as exc:
+        logger.debug("record sent messages skipped: %s", exc)
 
 
 def reply_text(reply_token: str, text: str) -> bool:
@@ -159,6 +169,7 @@ def push_messages(to: str, messages: list):
         else:
             short_to = to[:20] + "..."
             logger.info("[LINE_PUSH] start to=%s len=%d", short_to, len(str(messages)))
+            _record_sent(resp, messages, to if to.startswith("C") else None)
     except Exception as exc:
         logger.warning("push_messages failed: %s", exc)
 
