@@ -20,6 +20,7 @@ from goal_tracker import (
 
 from api_helpers import *
 from api_helpers import _should_log
+from memory_store import log_and_compact as _log_and_compact
 from linebot.v3.messaging import ReplyMessageRequest, TextMessage, ImageMessage, AudioMessage
 from horoscope import _ZODIAC, match_zodiac
 from state import translate_get, translate_delete, rate_limit_check, remove_bg_set
@@ -283,7 +284,7 @@ def handle_message(event):
     _remember(member_label, text)
     if _should_log(text):
         threading.Thread(
-            target=log_chat_message, args=(member_label, text), daemon=True
+            target=_log_and_compact, args=(member_label, text), daemon=True
         ).start()
 
     # ── 記事本 & 連結庫 ──

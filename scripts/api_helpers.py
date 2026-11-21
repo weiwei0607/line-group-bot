@@ -73,6 +73,7 @@ def _should_log(text: str) -> bool:
 
 
 from utils import call_gemini, call_ai, send_telegram_alert
+from memory_store import build_context as build_memory_context
 from weather import _daily_cached, _daily_cache_set, _rapid, _ninja, _QUOTA, _QUOTA_MSG, _get_recent_context
 import logging
 logger = logging.getLogger(__name__)
@@ -1041,13 +1042,11 @@ def rewrite_text(text: str) -> str:
 def handle_mention(text, member=None):
     group_mems = get_memories(days=14)
     personal_mems = get_personal_memories(member, days=14) if member else []
-    recent_chat = _get_recent_context(8)
+    recent_chat = build_memory_context()  # 摘要 + 最近原文，持久化在 Google Sheet
 
     context = ""
     if recent_chat:
-        context += "【最近聊天記錄】\n"
-        context += recent_chat
-        context += "\n\n"
+        context += recent_chat + "\n\n"
     if group_mems:
         context += "【群組近況】\n"
         context += "\n".join(f"[{d}] {c}" for d, c in group_mems)
