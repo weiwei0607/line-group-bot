@@ -222,7 +222,7 @@ _SIMPLE_HANDLERS = [
     (re.compile(r'數字冷知識|數字趣聞|數字趣談'), _cmd_number_fact),
     (re.compile(r'天文冷知識|科學冷知識|宇宙冷知識'), _cmd_astronomy),
     (re.compile(r'^金價|^今日金價|^黃金價格'), _cmd_gold),
-    (re.compile(r'^新聞|^今日新聞|^最新新聞|^頭條|^今天新聞'), _cmd_news),
+    (re.compile(r'^新聞|^今日新聞|^最新新聞|^頭條|^今天新聞|^(今天|今日|最近|現在)有(什麼|啥|甚麼|沒有|哪些).{0,3}(新聞|頭條)'), _cmd_news),
     (re.compile(r'^無聊|^我好無聊|^打發時間|^今天做什麼|^推薦活動|^隨機活動'), _cmd_activity),
     (re.compile(r'^配對'), _cmd_pairing),
     (re.compile(r'搖骰子|擲骰子|搖\d*[顆個]骰'), _cmd_dice),
@@ -243,7 +243,7 @@ _IMAGE_HANDLERS = [
 
 _DAILY_HANDLERS = [
     (re.compile(r'^今日日文單字|^日文單字|^學日文|^每日日語|^今日日文'), _cmd_daily_japanese),
-    (re.compile(r'^今日漢字|^漢字|^學漢字|^每日漢字'), _cmd_daily_kanji),
+    (re.compile(r'^今日漢字|^學漢字|^每日漢字|^漢字$'), _cmd_daily_kanji),
     (re.compile(r'^今日西文單字|^西文單字|^學西文|^學西班牙文|^每日西語|^今日西文'), _cmd_daily_spanish),
     (re.compile(r'電影台詞|電影名言|名片台詞'), _cmd_movie_quote),
     (re.compile(r'waifu|動漫圖|來張動漫圖|來張圖'), _cmd_waifu),

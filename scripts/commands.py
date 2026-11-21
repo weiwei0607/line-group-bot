@@ -4,6 +4,7 @@ Extracted from line_webhook.py.
 """
 
 import os
+import logging as _logging
 import re
 import random
 import threading
@@ -227,7 +228,7 @@ _REGEX_DISPATCH = [
     (re.compile(r"^查電影\s*(.+)$"), lambda match: fetch_imdb(match.group(1).strip())),
     (re.compile(r"^在哪看\s*(.+)$"), lambda match: fetch_streaming(match.group(1).strip())),
     (re.compile(r"^查超英\s*(.+)$"), lambda match: fetch_superhero(match.group(1).strip())),
-    (re.compile(r"^國家\s*(.+)$"), lambda match: fetch_country(match.group(1).strip())),
+    (re.compile(r"^國家\s+(.+)$"), lambda match: fetch_country(match.group(1).strip())),
     (re.compile(r"^找書\s*(.+)$"), lambda match: fetch_book(match.group(1).strip())),
     (re.compile(r"^查日文\s*(.+)$"), lambda match: fetch_jisho(match.group(1).strip())),
     (re.compile(r"^漢字\s*([^\s])$"), lambda match: fetch_kanji(match.group(1))),
@@ -236,6 +237,20 @@ _REGEX_DISPATCH = [
     (re.compile(r"^食譜\s+(.+)$"), lambda match: fetch_recipe_by_ingredient(match.group(1).strip())),
     (re.compile(r"^縮網址\s+(.+)$"), lambda match: shorten_url(match.group(1).strip())),
 ]
+
+
+def run_regex_commands(text: str):
+    """依序比對 _REGEX_DISPATCH，命中就回回覆文字，沒命中回 None。
+    2026-06-02 重構把這 12 個指令的 elif 刪掉、卻沒接上這張表，指令因此靜默壞掉（B1）。"""
+    for pattern, handler in _REGEX_DISPATCH:
+        m = pattern.match(text)
+        if m:
+            try:
+                return handler(m)
+            except Exception as exc:
+                _logging.warning("regex command %s failed: %s: %s", pattern.pattern, type(exc).__name__, exc)
+                return "查詢出了點狀況，晚點再試一次 🙏"
+    return None
 
 
 def _push_messages(messages: list):
@@ -254,10 +269,19 @@ def handle_message(event):
     user_id = getattr(source, 'user_id', None)
 
     # ── 去除 @bot 前綴（群組裡 @小棉襖 打卡 xxx 也能正常觸發）──
+    addressed = False  # 有 @ 到 bot；去掉前綴後文字裡就不一定還有 bot 名字了
     for prefix in (f"@{BOT_DISPLAY_NAME}", f"@{BOT_NAME}", "@小棉襖"):
         if text.startswith(prefix):
             text = text[len(prefix):].strip()
+            addressed = True
             break
+
+    # ── 明確的「前綴＋參數」指令（找歌/查電影/…）：要比 try_dispatch 先跑，
+    #    否則 try_dispatch 裡不帶 ^ 的字（貓貓、笑話、NASA…）會搶走「查電影 貓貓」──
+    cmd_reply = run_regex_commands(text)
+    if cmd_reply is not None:
+        reply(reply_token, cmd_reply)
+        return
 
     # Rate limiting (30 requests / 60s per user)
     if user_id and not rate_limit_check(user_id, max_requests=30, window_seconds=60):
@@ -279,6 +303,7 @@ def handle_message(event):
 
     reply_text = None
     reply_image_url = None
+    was_conversation = False
 
     member_label = get_member_label(group_id, user_id)
     _remember(member_label, text)
@@ -737,15 +762,17 @@ def handle_message(event):
     if reply_text is None:
         from mood_replies import detect_mood, handle_mood_mention
         mood = detect_mood(text)
-        if mood and (BOT_NAME in text or BOT_DISPLAY_NAME in text
+        if mood and (addressed or BOT_NAME in text or BOT_DISPLAY_NAME in text
                      or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
             reply_text = handle_mood_mention(text, member_label, mood)
+            was_conversation = True
 
     # ── 被點名（一般對話，且還沒被其他指令處理）──
     if reply_text is None:
-        if (BOT_NAME in text or BOT_DISPLAY_NAME in text
+        if (addressed or BOT_NAME in text or BOT_DISPLAY_NAME in text
               or "機器人" in text or "小棉襖" in text or "bot" in text.lower()):
             reply_text = handle_mention(text, member=member_label)
+            was_conversation = True
 
     if not reply_text and not reply_image_url:
         return
@@ -755,7 +782,12 @@ def handle_message(event):
         from line_push import reply_image_with_text
         reply_image_with_text(reply_token, reply_image_url, reply_text)
     elif reply_text:
-        _rt(reply_token, reply_text)
+        ok = _rt(reply_token, reply_text)
+        # 使用者在等的 @ 對話：reply token 過期時改用 push 補送一次（會算 push 額度，只限這類）
+        if not ok and was_conversation and group_id:
+            _logging.warning("conversation reply failed, falling back to push to group")
+            from line_push import push_text
+            push_text(group_id, reply_text)
     elif reply_image_url:
         _ri(reply_token, reply_image_url)
 

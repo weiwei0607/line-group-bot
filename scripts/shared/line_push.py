@@ -23,12 +23,30 @@ def _get_configuration():
     return _configuration
 
 
-def _reply_messages(reply_token: str, messages: list):
-    """Use requests directly to avoid urllib3 hanging issues in LINE Bot SDK."""
-    if not reply_token or not messages:
+_alert_times: dict = {}
+_ALERT_COOLDOWN = 30 * 60
+
+
+def _alert_once(key: str, msg: str):
+    """同一種失敗 30 分鐘內只發一次 Telegram，避免洗版。"""
+    now = time.time()
+    last = _alert_times.get(key)
+    if last is not None and now - last < _ALERT_COOLDOWN:
         return
+    _alert_times[key] = now
+    _telegram_alert(msg)
+
+
+def _reply_messages(reply_token: str, messages: list) -> bool:
+    """Use requests directly to avoid urllib3 hanging issues in LINE Bot SDK.
+
+    回傳 True＝LINE 接受（2xx）。非 2xx 會 log 狀態碼與回應前 200 字，並回 False
+    （reply token 過期／失效時 LINE 回 400，以前這裡完全沒痕跡）。
+    """
+    if not reply_token or not messages:
+        return False
     try:
-        _retry_http(
+        resp = _retry_http(
             lambda: requests.post(
                 "https://api.line.me/v2/bot/message/reply",
                 headers={
@@ -42,13 +60,21 @@ def _reply_messages(reply_token: str, messages: list):
     except Exception as exc:
         logger.warning("_reply_messages failed: %s", exc)
         raise
+    if resp is not None and not (200 <= resp.status_code < 300):
+        body = (getattr(resp, "text", "") or "")[:200]
+        logger.warning("[LINE_REPLY] status=%s body=%s", resp.status_code, body)
+        _alert_once(f"reply_{resp.status_code}", f"⚠️ LINE reply 失敗 HTTP {resp.status_code}：{body}")
+        return False
+    return True
 
 
-def reply_text(reply_token: str, text: str):
+def reply_text(reply_token: str, text: str) -> bool:
+    """回傳是否送出成功（呼叫端可據此決定要不要用 push 補送）。"""
     try:
-        _reply_messages(reply_token, [{"type": "text", "text": text[:4900]}])
+        return bool(_reply_messages(reply_token, [{"type": "text", "text": text[:4900]}]))
     except Exception as exc:
         logger.warning("reply_text failed: %s", exc)
+        return False
 
 
 def reply_image(reply_token: str, image_url: str, fallback_text: str = "圖片發送失敗"):

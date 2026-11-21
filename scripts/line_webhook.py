@@ -163,6 +163,12 @@ def callback():
     threading.Thread(target=_dispatch_callback, args=(body, signature), daemon=True).start()
     return "OK"
 
+@app.route("/ping", methods=["GET", "HEAD"])
+def ping():
+    """保活專用：只回 ok，不碰網路、不碰 SQLite。/health 留給人手動檢查。"""
+    return "ok", 200
+
+
 @app.route("/")
 @app.route("/health")
 def health():

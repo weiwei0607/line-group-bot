@@ -212,7 +212,9 @@ def build_context() -> str:
 
 def _default_llm(prompt: str):
     from utils import call_ai
-    return call_ai(prompt)
+    # 摘要上限 600 字；推理模型思考 token 也算在內，給足額度。被截斷（length）會回 None，
+    # compact 視為失敗、不前進 watermark，不會寫入半截摘要。
+    return call_ai(prompt, max_tokens=2000)
 
 
 def _build_prompt(old_summary: str, lines: list) -> str:

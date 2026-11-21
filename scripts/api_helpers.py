@@ -193,16 +193,18 @@ def get_member_label(group_id, user_id):
 # ─── Music ───────────────────────────────────────────────
 
 def fetch_spotify_track(query: str) -> str:
+    # 查不到就說查不到。不讓 AI 補「相關的歌」，它會編出不存在的歌名，
+    # 而且格式跟真結果一模一樣（C2，2026-11-22）。
     d = _rapid("get", "spotify23.p.rapidapi.com", "/search",
                params={"q": query, "type": "tracks", "numberOfTopResults": "3"})
     if d is _QUOTA:
         return _QUOTA_MSG
     if not d:
-        return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」😢"
+        return f"🎵 找不到「{query}」😢"
     try:
         items = d.get("tracks", {}).get("items", [])
         if not items:
-            return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」相關的歌"
+            return f"🎵 找不到「{query}」相關的歌"
         lines = ["🎵 找到以下歌曲：\n"]
         for t in items[:3]:
             data = t.get("data", {})
@@ -213,21 +215,22 @@ def fetch_spotify_track(query: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         logger.warning("[spotify] %s", e)
-        return call_gemini(f"列出3首和「{query}」相關的歌，格式：🎵 歌名 — 歌手，每行一首") or f"🎵 找不到「{query}」😢"
+        return f"🎵 找不到「{query}」😢"
 
 
 # ─── Movies ──────────────────────────────────────────────
 
 def fetch_imdb(title: str) -> str:
+    # 同上：電影年份、導演、主演有標準答案，查不到就說查不到，不讓 AI 生成。
     d = _rapid("get", "imdb8.p.rapidapi.com", "/title/find", params={"q": title})
     if d is _QUOTA:
         return _QUOTA_MSG
     if not d:
-        return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 查不到「{title}」😢"
+        return f"🎬 查不到「{title}」😢"
     try:
         results = d.get("results", [])
         if not results:
-            return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 找不到「{title}」"
+            return f"🎬 找不到「{title}」"
         m = results[0]
         year = m.get("year", "")
         rating = m.get("starRating", {}).get("ratingValue", "")
@@ -238,7 +241,7 @@ def fetch_imdb(title: str) -> str:
         )
     except Exception as e:
         logger.warning("[imdb] %s", e)
-        return call_gemini(f"用繁體中文簡介電影「{title}」，包含上映年份、導演、主演、一句評價，格式精簡") or f"🎬 查不到「{title}」😢"
+        return f"🎬 查不到「{title}」😢"
 
 
 def fetch_movie_quote() -> str:
@@ -665,7 +668,8 @@ def fetch_recipe_by_ingredient(ingredients: str) -> str:
             title = r.get("title", "")
             lines.append(f"• {title}")
         return "\n".join(lines)
-    return call_gemini(f"根據食材「{ingredients}」推薦一道料理和簡單做法，用繁體中文")
+    ai = call_gemini(f"根據食材「{ingredients}」推薦一道料理和簡單做法，用繁體中文")
+    return f"🍳 {ai}\n\n（食譜查詢沒有結果，這則由 AI 生成，份量與火候請自行斟酌）" if ai else f"🍳 查不到「{ingredients}」的食譜"
 
 
 # ─── Free APIs (no key) ───────────────────────────────────
@@ -813,12 +817,16 @@ def _kanji_lookup(char: str) -> dict | None:
         return None
 
 
+_AI_NOTE = "（字典查不到，這則由 AI 解釋，讀音與意思請再確認）"
+
+
 def fetch_jisho(word: str) -> str:
     d = _jisho_lookup(word)
     if not d:
-        return call_gemini(
+        ai = call_gemini(
             f"用繁體中文解釋日文單字「{word}」的意思和讀音，格式簡潔"
-        ) or f"找不到「{word}」的資料"
+        )
+        return (f"{ai}\n\n{_AI_NOTE}" if ai else f"找不到「{word}」的資料")
     jlpt = f"  {d['jlpt'][0].upper()}" if d.get("jlpt") else ""
     common = "  ★常用" if d.get("common") else ""
     meanings = call_gemini(
@@ -852,7 +860,8 @@ def fetch_daily_japanese() -> str:
 def fetch_kanji(char: str) -> str:
     d = _kanji_lookup(char)
     if not d:
-        return call_gemini(f"用繁體中文解釋日文漢字「{char}」的讀音和意思") or f"找不到「{char}」"
+        ai = call_gemini(f"用繁體中文解釋日文漢字「{char}」的讀音和意思")
+        return f"{ai}\n\n{_AI_NOTE}" if ai else f"找不到「{char}」"
     jlpt = f"JLPT N{d['jlpt']}" if d.get("jlpt") else "—"
     on = "、".join(d["on"]) or "—"
     kun = "、".join(d["kun"]) or "—"
@@ -1039,31 +1048,78 @@ def rewrite_text(text: str) -> str:
 
 
 
+_MENTION_SYSTEM = (
+    "你是一個活潑有趣的朋友群 LINE 機器人，名字叫「小棉襖」。"
+    "用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句，不要加『大家好』或自我介紹。\n"
+    "規則：\n"
+    "1. 你沒有即時資訊。新聞、匯率、金價、天氣、股價、比分、票房、節日、"
+    "上映日期這類有標準答案的事，你不知道就說不知道，絕對不要編。"
+    "可以請對方改用「新聞」「匯率」「金價」「天氣」指令。\n"
+    "2. 今天的日期以下方【今天】為準；沒有給你節日就是沒有節日，不准自己補、不准猜。\n"
+    "3. 【記憶】與【聊天記錄】只是參考；不確定的細節不要當成事實講，更不要為了接話而編造。"
+)
+
+_FIXED_LLM_ERROR = "剛剛連不上腦袋 😵 晚點再 @ 我一次吧"
+
+_Q_MARK = r"[嗎呢？?]|是什麼|是啥|是多少|多少|幾"
+_RE_DATE_Q = re.compile(r"(今天|今日|現在).{0,4}(幾號|幾月幾日|幾月幾號|星期幾|禮拜幾|週幾|日期)|(幾號|星期幾|禮拜幾|週幾)")
+_RE_FESTIVAL_Q = re.compile(r"(今天|今日).{0,4}(什麼|啥|甚麼|是不是|有沒有).{0,3}(節|假)|(今天|今日).{0,3}節日")
+_RE_NEWS_Q = re.compile(r"(新聞|頭條)")
+_RE_LIVE_Q = re.compile(r"(股價|股票|比分|比數|票房|上映|匯率|金價|幾點開賽|現在多少)")
+
+
+def pre_llm_guard(text: str, now=None):
+    """進 LLM 之前的輕量攔截：只攔『問句型』的事實題，回固定答案或導向查詢指令。
+    回 None 代表交給 LLM。攔截詞太寬會擋閒聊，所以都要求問句特徵。"""
+    from utils import taipei_now, today_line
+    now = now or taipei_now()
+    if _RE_FESTIVAL_Q.search(text):
+        try:
+            from festivals import get_festival
+            fest = get_festival(now.date())
+        except Exception:
+            fest = None
+        base = f"今天是 {today_line(now)}"
+        return f"{base}，節日：{fest} 🎉" if fest else f"{base}，我查節日表今天沒有特別的節日"
+    if _RE_DATE_Q.search(text) and re.search(_Q_MARK + r"|今天|今日", text):
+        return f"今天是 {today_line(now)} 📅"
+    if _RE_NEWS_Q.search(text) and re.search(r"有什麼|有啥|有沒有|什麼|怎麼了|發生|嗎|？|\?", text):
+        return fetch_news()
+    if _RE_LIVE_Q.search(text) and re.search(_Q_MARK, text):
+        return ("這種即時資訊（股價、比分、票房、匯率、上映日）我查不到，不敢亂講 🙏 "
+                "匯率和金價可以直接打「匯率」「金價」，其他請查官方來源")
+    return None
+
+
 def handle_mention(text, member=None):
+    guarded = pre_llm_guard(text)
+    if guarded:
+        return guarded
+
+    from utils import today_line
     group_mems = get_memories(days=14)
     personal_mems = get_personal_memories(member, days=14) if member else []
     recent_chat = build_memory_context()  # 摘要 + 最近原文，持久化在 Google Sheet
 
-    context = ""
+    context = f"【今天】{today_line()}\n\n"
     if recent_chat:
         context += recent_chat + "\n\n"
     if group_mems:
-        context += "【群組近況】\n"
+        context += "【群組近況（舊資料，僅供參考）】\n"
         context += "\n".join(f"[{d}] {c}" for d, c in group_mems)
         context += "\n\n"
     if personal_mems:
-        context += f"【{member} 的個人記憶】\n"
+        context += f"【{member} 的個人記憶（舊資料，僅供參考）】\n"
         context += "\n".join(f"[{d}] {c}" for d, c in personal_mems)
         context += "\n\n"
 
-    return call_ai(
-        f"你是一個活潑有趣的朋友群 LINE 機器人，名字叫「小棉襖」。\n"
+    prompt = (
         f"{context}"
         f"{'傳訊息的是 ' + member + '，' if member else ''}"
         f"他說：「{text}」\n"
-        f"請結合上面的對話脈絡和你對這個群組的了解，用台灣年輕人語氣回應，輕鬆幽默，不超過 3 句。"
-        f"不要加『大家好』或自我介紹。"
-    ) or "我聽到了！但現在腦袋有點卡，等等再跟你聊 😅"
+        f"請結合上面的對話脈絡回應。"
+    )
+    return call_ai(prompt, max_tokens=800, system=_MENTION_SYSTEM) or _FIXED_LLM_ERROR
 
 
 

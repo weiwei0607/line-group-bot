@@ -1,5 +1,7 @@
 name: Keep Alive
 
+# 每 5 分鐘打一次輕量的 /ping（只回 ok，不碰 LINE／Sheets），避免 Render 免費方案休眠。
+# GitHub 排程是盡力而為，偶爾會延遲；建議另外用 UptimeRobot 之類打同一個 /ping 互為備援。
 on:
   schedule:
     - cron: '4,9,14,19,24,29,34,39,44,49,54,59 * * * *'
@@ -10,4 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping server
-        run: curl -s "${{ secrets.RENDER_APP_URL }}/health" || true
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+        run: |
+          if [ -z "$RENDER_APP_URL" ]; then echo "RENDER_APP_URL secret not set"; exit 1; fi
+          # 休眠中喚醒要 30-60 秒，所以 timeout 給長一點；失敗會在 log 留下 HTTP 狀態
+          curl -sS --max-time 90 --retry 2 --retry-delay 5 -o /dev/null \
+            -w "ping status=%{http_code} time=%{time_total}s\n" "$RENDER_APP_URL/ping" \
+            || echo "ping failed (non-fatal)"
