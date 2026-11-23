@@ -218,7 +218,7 @@ _SIMPLE_HANDLERS = [
     (re.compile(r'梗圖|隨機梗圖'), _cmd_meme),
     (re.compile(r'諾里斯|chuck|norris|查克諾里斯|功夫笑話'), _cmd_chuck_norris),
     (re.compile(r'名人語錄|激勵名言|今日名言|^名言$|給我力量'), _cmd_quotable),
-    (re.compile(r'來一題|今日題目|抽題目'), _cmd_trivia),
+    (re.compile(r'今日題目|抽題目'), _cmd_trivia),  # 「來一題」交給 handlers/quiz.py（互動答題＋積分）
     (re.compile(r'數字冷知識|數字趣聞|數字趣談'), _cmd_number_fact),
     (re.compile(r'天文冷知識|科學冷知識|宇宙冷知識'), _cmd_astronomy),
     (re.compile(r'^金價|^今日金價|^黃金價格'), _cmd_gold),

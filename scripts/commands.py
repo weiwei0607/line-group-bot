@@ -261,7 +261,30 @@ def _push_messages(messages: list):
         push_messages(gid, messages)
 
 
+def _source_allowed(source) -> bool:
+    """只服務自己的群組。所有資料（暱稱、記憶、記事、目標）都是單一群組共用，
+    外人私訊或把 bot 拉進別的群，都不能讀寫這些資料或觸發推播。
+    - 群組訊息：group_id 必須等於 LINE_GROUP_ID
+    - 1:1 私訊：user_id 必須列在 ALLOWED_USER_IDS（逗號分隔，可留空＝不收私訊）
+    - LINE_GROUP_ID 沒設定時維持舊行為（全部放行）並記警告，避免設定缺漏讓 bot 整個不回
+    """
+    allowed_group = os.environ.get("LINE_GROUP_ID", "").strip()
+    if not allowed_group:
+        _logging.warning("LINE_GROUP_ID 未設定：不檢查訊息來源")
+        return True
+    group_id = getattr(source, "group_id", None)
+    if group_id:
+        return group_id == allowed_group
+    if getattr(source, "room_id", None):
+        return False
+    user_id = getattr(source, "user_id", None)
+    allowed_users = {u.strip() for u in os.environ.get("ALLOWED_USER_IDS", "").split(",") if u.strip()}
+    return bool(user_id) and user_id in allowed_users
+
+
 def handle_message(event):
+    if not _source_allowed(event.source):
+        return
     text = event.message.text.strip()
     reply_token = event.reply_token
     source = event.source
@@ -346,7 +369,7 @@ def handle_message(event):
         threading.Thread(target=send_morning_greeting, daemon=True).start()
 
     elif text == "!測試總結":
-        import traceback, os
+        import traceback
         _goal_sheet_id = os.environ.get("GOAL_SHEET_ID", "")
         lines = ["🔍 每日總結診斷報告\n"]
         lines.append(f"GOAL_SHEET_ID: {'✅ 已設定' if _goal_sheet_id else '❌ 未設定'}")
@@ -809,6 +832,8 @@ def handle_message(event):
 
 def handle_audio(event):
     """Speech-to-text via Gemini, fallback to Shazam."""
+    if not _source_allowed(event.source):
+        return
     reply_token = event.reply_token
     message_id = event.message.id
 
@@ -874,10 +899,14 @@ def handle_audio(event):
 
 def handle_image(event):
     """NSFW detection + background removal for image messages."""
+    if not _source_allowed(event.source):
+        return
     from handlers.media import handle_image as _handle_image
     _handle_image(event, configuration)
 
 
 def handle_join(event):
+    if not _source_allowed(event.source):
+        return
     from handlers.join import handle_join as _handle_join
     _handle_join(event, configuration)

@@ -1,4 +1,5 @@
 """Horoscope API helpers."""
+import base64
 import os
 import random
 import requests

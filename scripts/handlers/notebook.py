@@ -94,11 +94,12 @@ def _append_row(row):
         return False
     _ensure_tab()
     try:
-        requests.post(
+        r = requests.post(
             f"https://sheets.googleapis.com/v4/spreadsheets/{_SHEET_ID}/values/{_TAB}!A1:append?valueInputOption=USER_ENTERED",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={"values": [row]}, timeout=10,
         )
+        r.raise_for_status()
         return True
     except Exception as e:
         print(f"[Notebook] Append failed: {e}")
@@ -166,13 +167,14 @@ def delete_note(title: str) -> bool:
                         break
                 if sheet_id is None:
                     return False
-                requests.post(
+                r = requests.post(
                     f"https://sheets.googleapis.com/v4/spreadsheets/{_SHEET_ID}:batchUpdate",
                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                     json={"requests": [{"deleteDimension": {
                         "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": i - 1, "endIndex": i}
                     }}]}, timeout=10,
                 )
+                r.raise_for_status()
                 return True
             except Exception as e:
                 print(f"[Notebook] Delete failed: {e}")

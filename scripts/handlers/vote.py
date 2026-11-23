@@ -41,6 +41,7 @@ def handle_vote(text: str, group_id: str, member_label: str) -> str | None:
             idx = ord(chosen) - ord("A")
             if idx < len(vstate["options"]):
                 vstate["votes"][member_label] = chosen
+                vote_set(gid, vstate)  # vote_get 回的是副本，要寫回才算投到
                 opt_name = vstate["options"][idx]
                 reply_text = f"✅ {member_label} 投了 {chosen}. {opt_name}"
                 if len(vstate["votes"]) >= max(2, len(MEMBERS)):

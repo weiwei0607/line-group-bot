@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 DB_PATH = os.environ.get("TTS_DB_PATH", "./data/tts_store.db")
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
-_write_lock = threading.Lock()
+_write_lock = threading.RLock()  # 可重入：_maybe_cleanup() 會在持鎖時再取鎖
 
 
 def _conn():

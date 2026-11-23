@@ -93,11 +93,12 @@ def _append_row(row):
         return False
     _ensure_tab()
     try:
-        requests.post(
+        r = requests.post(
             f"https://sheets.googleapis.com/v4/spreadsheets/{_SHEET_ID}/values/{_TAB}!A1:append?valueInputOption=USER_ENTERED",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={"values": [row]}, timeout=10,
         )
+        r.raise_for_status()
         return True
     except Exception as e:
         print(f"[Links] Append failed: {e}")
@@ -110,14 +111,78 @@ def extract_urls(text: str) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+_MAX_FETCH_BYTES = 256 * 1024   # 標題和摘要都在檔頭，256KB 綽綽有餘；大檔不會被整包讀進記憶體
+_MAX_REDIRECTS = 3
+_FETCH_DEADLINE = 10            # 秒，整次抓取的總時限
+
+
+def _host_is_public(host: str) -> bool:
+    """解析主機名，所有 IP 都必須是公開位址（擋 localhost、內網、link-local、metadata 等）。"""
+    import ipaddress
+    import socket
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
+def _safe_get_html(url: str, headers: dict, timeout: int) -> str | None:
+    """只抓公開網址的 HTML，自己逐跳跟轉址（每跳都重查主機），最多讀 _MAX_FETCH_BYTES。
+    不符合條件（內網、非 HTML、轉址太多、逾時）回 None。"""
+    import time
+    from urllib.parse import urljoin, urlparse
+    deadline = time.monotonic() + _FETCH_DEADLINE
+    for _ in range(_MAX_REDIRECTS + 1):
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not _host_is_public(parsed.hostname or ""):
+            print(f"[Links] Skip non-public url: {parsed.scheme}://{parsed.hostname}")
+            return None
+        r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=False, stream=True)
+        try:
+            if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+                loc = r.headers.get("Location")
+                if not loc:
+                    return None
+                url = urljoin(url, loc)
+                continue
+            r.raise_for_status()
+            ctype = r.headers.get("Content-Type", "").lower()
+            if "html" not in ctype:
+                return None
+            buf = bytearray()
+            for chunk in r.iter_content(chunk_size=16384):
+                buf.extend(chunk)
+                if len(buf) >= _MAX_FETCH_BYTES or time.monotonic() > deadline:
+                    break
+            enc = r.encoding or "utf-8"
+            try:
+                return bytes(buf[:_MAX_FETCH_BYTES]).decode(enc, errors="replace")
+            except LookupError:
+                return bytes(buf[:_MAX_FETCH_BYTES]).decode("utf-8", errors="replace")
+        finally:
+            r.close()
+    return None
+
+
 def fetch_title(url: str, timeout: int = 8) -> tuple[str, str]:
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
         }
-        r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-        r.raise_for_status()
-        html = r.text
+        html = _safe_get_html(url, headers, timeout)
+        if html is None:
+            return url, ""
         title = url
         m = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
         if m:
