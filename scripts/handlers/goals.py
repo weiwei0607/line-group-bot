@@ -65,15 +65,25 @@ def parse_goals(text_after_prefix):
     return [p.strip() for p in parts if p.strip()][:5]
 
 
-def handle_set_goals(member, text):
+def validate_goals_input(text):
+    """快速解析與驗證輸入格式，不碰網路。回傳 (goals, error_message)。"""
     after = re.sub(r'^設目標[：:\s]*', '', text).strip()
     if not after:
-        return "目標內容不能空白！\n格式：設目標：目標1 / 目標2 / 目標3"
+        return None, "目標內容不能空白！\n格式：設目標：目標1 / 目標2 / 目標3"
 
     goals = parse_goals(after)
     if not goals:
-        return "沒讀到目標，試試：設目標：目標1 / 目標2 / 目標3"
+        return None, "沒讀到目標，試試：設目標：目標1 / 目標2 / 目標3"
 
+    return goals, None
+
+
+def handle_set_goals(member, goals):
+    """寫入 Sheets 並回傳結果訊息。
+
+    含重試會等到數十秒，呼叫端要用 _async_push 之類的背景執行緒呼叫，
+    不要在等 reply_token 的當下同步呼叫，不然使用者會等很久甚至 reply_token 過期。
+    """
     cycle_id, day, total = get_cycle_info()
     goals_preview = "\n".join(f"  {i+1}. {g}" for i, g in enumerate(goals))
 
