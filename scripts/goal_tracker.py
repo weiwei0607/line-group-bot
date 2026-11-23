@@ -116,7 +116,7 @@ def _sheets_get(token, range_):
 def _sheets_append(token, range_, values):
     url = (f"https://sheets.googleapis.com/v4/spreadsheets/{GOAL_SHEET_ID}"
            f"/values/{range_}:append?valueInputOption=USER_ENTERED")
-    _retry_http(
+    r = _retry_http(
         lambda: requests.post(
             url,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -124,12 +124,13 @@ def _sheets_append(token, range_, values):
             timeout=10,
         )
     )
+    r.raise_for_status()  # 寫入失敗要丟例外，呼叫端才不會回「成功」
 
 
 def _sheets_update(token, range_, values):
     url = (f"https://sheets.googleapis.com/v4/spreadsheets/{GOAL_SHEET_ID}"
            f"/values/{range_}?valueInputOption=USER_ENTERED")
-    _retry_http(
+    r = _retry_http(
         lambda: requests.put(
             url,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -137,6 +138,7 @@ def _sheets_update(token, range_, values):
             timeout=10,
         )
     )
+    r.raise_for_status()
 
 
 # ─── Cycle logic ──────────────────────────────────────────
